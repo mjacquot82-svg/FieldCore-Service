@@ -48,6 +48,28 @@ function getCustomerBalance(customerId) {
   );
 }
 
+function getCustomerSummary(customerId) {
+  const properties = state.properties.filter((property) => property.customer_id === customerId);
+  const propertyIds = new Set(properties.map((property) => property.property_id));
+  const visits = state.visits.filter((visit) => propertyIds.has(visit.property_id));
+  const lastVisit = visits
+    .filter((visit) => Boolean(visit.visit_date))
+    .sort((a, b) => b.visit_date.localeCompare(a.visit_date))[0];
+  const activeRecurringServices = properties.filter(
+    (property) =>
+      property.status === 'active' &&
+      property.recurring_frequency &&
+      property.recurring_frequency !== 'none' &&
+      property.recurring_frequency !== 'one-time'
+  ).length;
+
+  return {
+    propertyCount: properties.length,
+    activeRecurringServices,
+    lastVisitDate: lastVisit?.visit_date ?? 'No visits yet'
+  };
+}
+
 function ensureRouteVisitsForDate(targetDate) {
   const customerMap = getCustomerMap(state);
   const recurringFrequencies = new Set(['weekly', 'biweekly', 'monthly']);
@@ -169,9 +191,10 @@ function renderView(view, metrics, customerMap, propertyMap) {
     return `<section><h2>Customers</h2><div class="stack">${state.customers
       .map((c) => {
         const balance = getCustomerBalance(c.customer_id);
+        const summary = getCustomerSummary(c.customer_id);
         const paidUp = balance.outstanding <= 0;
         const overdue = balance.overdue > 0;
-        return `<article class="panel"><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p><p>${c.billing_address}</p><p>Status: ${c.status}</p><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-nav="properties">View Properties</button><button data-nav="visits">View Visit History</button></div></article>`;
+        return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-nav="properties">View Properties</button><button data-nav="visits">View Visit History</button></div></article>`;
       })
       .join('')}</div></section>`;
   }
