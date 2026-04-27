@@ -174,7 +174,8 @@ function renderCustomers() {
 function renderTimeline(customerMap, propertyMap) {
   const customer = selectedCustomer();
   const events = customer ? buildCustomerTimeline(customer.customer_id, customerMap, propertyMap) : [];
-  return `<section><h2>${customer ? `${customer.name} Customer Activity` : 'Customer Activity'}</h2><button class="primary" data-nav="customers">Back to Customers</button><div class="stack timeline-stack">${events.length ? events.map((event) => `<article class="panel timeline-event"><div class="timeline-date">${event.date}</div><div><span class="badge outstanding">${event.type}</span><h3>${event.title}</h3><p>${event.detail}</p></div></article>`).join('') : '<article class="panel"><p>No customer activity found yet.</p></article>'}</div></section>`;
+  const quickActions = customer ? `<div class="actions" style="margin: 0.75rem 0;"><button data-customer-nav="properties:${customer.customer_id}">+ Add Service</button><button data-customer-nav="properties:${customer.customer_id}">+ Schedule Visit</button><button data-nav="batch">Create Invoice</button><button data-nav="payments">Record Payment</button></div>` : '';
+  return `<section><h2>${customer ? `${customer.name} Customer Activity` : 'Customer Activity'}</h2><button class="primary" data-nav="customers">Back to Customers</button>${quickActions}<div class="stack timeline-stack">${events.length ? events.map((event) => `<article class="panel timeline-event"><div class="timeline-date">${event.date}</div><div><span class="badge outstanding">${event.type}</span><h3>${event.title}</h3><p>${event.detail}</p></div></article>`).join('') : '<article class="panel"><p>No customer activity found yet.</p></article>'}</div></section>`;
 }
 
 function renderProperties(customerMap) {
