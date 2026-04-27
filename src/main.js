@@ -15,6 +15,7 @@ let activeView = 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
 let selectedCustomerId = '';
+let selectedCustomerLetter = 'all';
 
 const navItems = [
   ['dashboard', 'Dashboard'],
@@ -28,6 +29,10 @@ const navItems = [
 
 function currency(amount) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+}
+
+function makeId(prefix) {
+  return `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 }
 
 function getCustomerBalance(customerId) {
@@ -75,6 +80,30 @@ function getSelectedCustomer() {
   return selectedCustomerId ? state.customers.find((customer) => customer.customer_id === selectedCustomerId) : null;
 }
 
+function getCustomerProperties(customerId) {
+  return state.properties.filter((property) => property.customer_id === customerId);
+}
+
+function getFilteredCustomers() {
+  if (selectedCustomerLetter === 'all') return state.customers;
+  return state.customers.filter((customer) => customer.name?.trim().toUpperCase().startsWith(selectedCustomerLetter));
+}
+
+function renderCustomerLetterFilter() {
+  const letters = [...new Set(state.customers.map((customer) => customer.name?.trim().charAt(0).toUpperCase()).filter(Boolean))].sort();
+  return `
+    <div class="letter-filter panel">
+      <button class="${selectedCustomerLetter === 'all' ? 'active' : ''}" data-letter-filter="all">All</button>
+      ${letters
+        .map(
+          (letter) =>
+            `<button class="${selectedCustomerLetter === letter ? 'active' : ''}" data-letter-filter="${letter}">${letter}</button>`
+        )
+        .join('')}
+    </div>
+  `;
+}
+
 function ensureRouteVisitsForDate(targetDate) {
   const customerMap = getCustomerMap(state);
   const recurringFrequencies = new Set(['weekly', 'biweekly', 'monthly']);
@@ -93,7 +122,7 @@ function ensureRouteVisitsForDate(targetDate) {
     if (hasVisitForDate) return;
 
     newVisits.push({
-      visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
+      visit_id: makeId('visit'),
       company_id: state.company.company_id,
       property_id: property.property_id,
       visit_date: targetDate,
@@ -193,27 +222,61 @@ function renderView(view, metrics, customerMap, propertyMap) {
   }
 
   if (view === 'customers') {
-    return `<section><h2>Customers</h2><div class="stack">${state.customers
-      .map((c) => {
-        const balance = getCustomerBalance(c.customer_id);
-        const summary = getCustomerSummary(c.customer_id);
-        const paidUp = balance.outstanding <= 0;
-        const overdue = balance.overdue > 0;
-        return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">View Properties</button><button data-customer-nav="visits:${c.customer_id}">View Visit History</button></div></article>`;
-      })
-      .join('')}</div></section>`;
+    const customers = getFilteredCustomers();
+    return `<section><h2>Customers</h2>${renderCustomerLetterFilter()}<div class="stack">${customers.length
+      ? customers
+          .map((c) => {
+            const balance = getCustomerBalance(c.customer_id);
+            const summary = getCustomerSummary(c.customer_id);
+            const paidUp = balance.outstanding <= 0;
+            const overdue = balance.overdue > 0;
+            return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">Manage Services</button><button data-customer-nav="visits:${c.customer_id}">View Visit History</button></div></article>`;
+          })
+          .join('')
+      : '<article class="panel"><p>No customers found for this letter.</p></article>'}</div></section>`;
   }
 
   if (view === 'properties') {
     const selectedCustomer = getSelectedCustomer();
-    const properties = selectedCustomerId
-      ? state.properties.filter((property) => property.customer_id === selectedCustomerId)
-      : state.properties;
-    return `<section><h2>${selectedCustomer ? `${selectedCustomer.name} Properties / Service Locations` : 'Properties / Service Locations'}</h2>${selectedCustomer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}<div class="stack">${properties.length
+    const properties = selectedCustomerId ? getCustomerProperties(selectedCustomerId) : state.properties;
+    return `<section><h2>${selectedCustomer ? `${selectedCustomer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${selectedCustomer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${
+      selectedCustomer
+        ? `<div class="service-layout">
+            <form id="service-form" class="panel service-form">
+              <h3>Add Recurring Service or Service Location</h3>
+              <label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label>
+              <label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label>
+              <label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label>
+              <label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label>
+              <label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label>
+              <button class="primary" type="submit">Add Service</button>
+            </form>
+            <form id="one-off-form" class="panel service-form">
+              <h3>Schedule One-Off Job</h3>
+              ${
+                properties.length
+                  ? `<label>Service Location<select name="property_id" required>${properties
+                      .map((property) => `<option value="${property.property_id}">${property.service_address}</option>`)
+                      .join('')}</select></label>`
+                  : '<p>Add a service location before scheduling a one-off job.</p>'
+              }
+              <label>Job Date<input name="visit_date" type="date" required /></label>
+              <label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label>
+              <label>Price<input name="price" type="number" min="0" step="0.01" required /></label>
+              <label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label>
+              <button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button>
+            </form>
+          </div>`
+        : ''
+    }<div class="stack">${properties.length
       ? properties
           .map((p) => {
             const customer = customerMap[p.customer_id];
-            return `<article class="panel"><h3>${p.service_address}</h3><p>${customer?.name ?? 'Unknown Customer'}</p><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p></article>`;
+            return `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customer?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${
+              selectedCustomer
+                ? `<div class="actions"><button data-service-edit="${p.property_id}">Change Service</button><button data-service-remove="${p.property_id}">Remove Service</button></div>`
+                : ''
+            }</article>`;
           })
           .join('')
       : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
@@ -233,7 +296,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
       ? visits
           .map((v) => {
             const property = propertyMap[v.property_id];
-            return `<article class="panel"><h3>${v.visit_date} · ${v.service_description}</h3><p>${property?.service_address ?? 'Unknown property'}</p><p>Price ${currency(v.price)} · Status: ${v.status}</p></article>`;
+            return `<article class="panel"><h3>${v.visit_date} · ${v.service_description}</h3><p>${property?.service_address ?? 'Unknown property'}</p><p>Price ${currency(v.price)} · Status: ${v.status}</p><p>Notes: ${v.notes || 'None'}</p></article>`;
           })
           .join('')
       : '<article class="panel"><p>No visits found for this customer.</p></article>'}</div></section>`;
@@ -333,12 +396,122 @@ function bindEvents() {
     });
   });
 
+  app.querySelectorAll('[data-letter-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      selectedCustomerLetter = button.dataset.letterFilter;
+      render();
+    });
+  });
+
   app.querySelectorAll('[data-customer-nav]').forEach((button) => {
     button.addEventListener('click', () => {
       const [view, customerId] = button.dataset.customerNav.split(':');
       activeView = view;
       selectedCustomerId = customerId;
       flashMessage = '';
+      render();
+    });
+  });
+
+  const serviceForm = app.querySelector('#service-form');
+  if (serviceForm && selectedCustomerId) {
+    serviceForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const formData = new FormData(serviceForm);
+      state.properties = [
+        ...state.properties,
+        {
+          property_id: makeId('prop'),
+          company_id: state.company.company_id,
+          customer_id: selectedCustomerId,
+          service_address: formData.get('service_address'),
+          service_type: formData.get('service_type'),
+          recurring_frequency: formData.get('recurring_frequency'),
+          default_price: Number(formData.get('default_price') || 0),
+          status: 'active',
+          notes: formData.get('notes') || '',
+          created_at: new Date().toISOString()
+        }
+      ];
+      saveState(state);
+      flashMessage = 'Service added.';
+      render();
+    });
+  }
+
+  const oneOffForm = app.querySelector('#one-off-form');
+  if (oneOffForm && selectedCustomerId) {
+    oneOffForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const formData = new FormData(oneOffForm);
+      state.visits = [
+        ...state.visits,
+        {
+          visit_id: makeId('visit'),
+          company_id: state.company.company_id,
+          property_id: formData.get('property_id'),
+          visit_date: formData.get('visit_date'),
+          service_description: formData.get('service_description'),
+          price: Number(formData.get('price') || 0),
+          status: 'scheduled',
+          notes: formData.get('notes') || 'One-off job',
+          created_at: new Date().toISOString()
+        }
+      ];
+      saveState(state);
+      flashMessage = 'One-off job scheduled.';
+      render();
+    });
+  }
+
+  app.querySelectorAll('[data-service-edit]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const propertyId = button.dataset.serviceEdit;
+      const property = state.properties.find((item) => item.property_id === propertyId);
+      if (!property) return;
+
+      const serviceType = window.prompt('Service type:', property.service_type);
+      if (!serviceType) return;
+      const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency);
+      if (!frequency) return;
+      const price = window.prompt('Default price:', property.default_price);
+      if (price === null) return;
+      const notes = window.prompt('Notes:', property.notes || '');
+      if (notes === null) return;
+      const status = window.prompt('Status (active or inactive):', property.status || 'active');
+      if (!status) return;
+
+      state.properties = state.properties.map((item) =>
+        item.property_id === propertyId
+          ? {
+              ...item,
+              service_type: serviceType,
+              recurring_frequency: frequency,
+              default_price: Number(price || 0),
+              notes,
+              status
+            }
+          : item
+      );
+      saveState(state);
+      flashMessage = 'Service updated.';
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-service-remove]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const propertyId = button.dataset.serviceRemove;
+      const property = state.properties.find((item) => item.property_id === propertyId);
+      if (!property) return;
+      const confirmed = window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`);
+      if (!confirmed) return;
+
+      state.properties = state.properties.map((item) =>
+        item.property_id === propertyId ? { ...item, status: 'inactive' } : item
+      );
+      saveState(state);
+      flashMessage = 'Service removed from active work.';
       render();
     });
   });
@@ -408,7 +581,7 @@ function bindEvents() {
             { ...visit, status: 'skipped' },
             {
               ...visit,
-              visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
+              visit_id: makeId('visit'),
               visit_date: nextDate,
               status: 'scheduled',
               created_at: new Date().toISOString()
@@ -428,6 +601,7 @@ function bindEvents() {
       state = resetSeed();
       selectedRouteDate = new Date().toISOString().slice(0, 10);
       selectedCustomerId = '';
+      selectedCustomerLetter = 'all';
       flashMessage = 'Seed data restored.';
       render();
     });
