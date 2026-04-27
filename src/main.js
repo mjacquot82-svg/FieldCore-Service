@@ -31,7 +31,51 @@ function currency(amount) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
+function ensureRouteVisitsForDate(targetDate) {
+  const customerMap = getCustomerMap(state);
+  const recurringFrequencies = new Set(['weekly', 'biweekly', 'monthly']);
+  const newVisits = [];
+
+  state.properties.forEach((property) => {
+    const customer = customerMap[property.customer_id];
+    if (property.company_id !== state.company.company_id) return;
+    if (property.status !== 'active') return;
+    if (!recurringFrequencies.has(property.recurring_frequency)) return;
+    if (!customer || customer.status !== 'active') return;
+
+    const hasVisitForDate = state.visits.some(
+      (visit) => visit.property_id === property.property_id && visit.visit_date === targetDate
+    );
+    if (hasVisitForDate) return;
+
+    newVisits.push({
+      visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
+      company_id: state.company.company_id,
+      property_id: property.property_id,
+      visit_date: targetDate,
+      service_description: `${property.recurring_frequency} ${property.service_type.toLowerCase()} service`,
+      price: property.default_price,
+      status: 'scheduled',
+      notes: property.notes || 'Auto-generated recurring visit.',
+      created_at: new Date().toISOString()
+    });
+  });
+
+  if (newVisits.length) {
+    state.visits = [...state.visits, ...newVisits];
+  }
+
+  return newVisits.length;
+}
+
 function render() {
+  if (activeView === 'today-route') {
+    const createdCount = ensureRouteVisitsForDate(selectedRouteDate);
+    if (createdCount > 0) {
+      saveState(state);
+    }
+  }
+
   const customerMap = getCustomerMap(state);
   const propertyMap = getPropertyMap(state);
   const metrics = computeDashboard(state);

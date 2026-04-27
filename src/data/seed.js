@@ -1,4 +1,5 @@
 const companyId = 'co_lawn_001';
+const todayDate = new Date().toISOString().slice(0, 10);
 
 export const seedData = {
   company: {
@@ -257,6 +258,50 @@ export const seedData = {
       status: 'scheduled',
       notes: 'Planned route stop.',
       created_at: '2026-04-11T09:00:00.000Z'
+    },
+    {
+      visit_id: 'visit_today_001',
+      company_id: companyId,
+      property_id: 'prop_001',
+      visit_date: todayDate,
+      service_description: 'Weekly mow and edging',
+      price: 180,
+      status: 'scheduled',
+      notes: 'Demo route stop for today.',
+      created_at: new Date().toISOString()
+    },
+    {
+      visit_id: 'visit_today_002',
+      company_id: companyId,
+      property_id: 'prop_003',
+      visit_date: todayDate,
+      service_description: 'Weekly lawn service',
+      price: 75,
+      status: 'scheduled',
+      notes: 'Demo route stop for today.',
+      created_at: new Date().toISOString()
+    },
+    {
+      visit_id: 'visit_today_003',
+      company_id: companyId,
+      property_id: 'prop_004',
+      visit_date: todayDate,
+      service_description: 'Commercial weekly mow',
+      price: 215,
+      status: 'scheduled',
+      notes: 'Demo route stop for today.',
+      created_at: new Date().toISOString()
+    },
+    {
+      visit_id: 'visit_today_004',
+      company_id: companyId,
+      property_id: 'prop_007',
+      visit_date: todayDate,
+      service_description: 'Dock debris cleanup',
+      price: 90,
+      status: 'scheduled',
+      notes: 'Demo route stop for today.',
+      created_at: new Date().toISOString()
     }
   ],
   invoices: [
