@@ -22,6 +22,16 @@ body { margin: 0; }
   padding: 1rem;
   border: 1px solid #e2e8f0;
 }
+.card p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.85rem;
+}
+.card strong {
+  display: block;
+  margin-top: 0.45rem;
+  font-size: 1.2rem;
+}
 .stack { display: grid; gap: 0.75rem; }
 .nav-btn, button {
   width: 100%;

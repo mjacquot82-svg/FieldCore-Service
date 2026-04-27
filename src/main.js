@@ -19,7 +19,7 @@ const navItems = [
   ['customers', 'Customers'],
   ['properties', 'Properties'],
   ['visits', 'Service Visits'],
-  ['batch', 'Batch Invoices'],
+  ['batch', 'Ready to Bill'],
   ['invoices', 'Invoices'],
   ['payments', 'Payments'],
   ['settings', 'Settings']
@@ -33,11 +33,12 @@ function render() {
   const customerMap = getCustomerMap(state);
   const propertyMap = getPropertyMap(state);
   const metrics = computeDashboard(state);
+  const companyName = state.company?.name?.trim() || 'ServiceBatch';
 
   app.innerHTML = `
     <div class="layout">
       <aside class="sidebar">
-        <h1>ServiceBatch Invoice</h1>
+        <h1>${companyName}</h1>
         <nav>${navItems
           .map(
             ([id, label]) =>
@@ -70,13 +71,20 @@ function renderView(view, metrics, customerMap, propertyMap) {
       <section>
         <h2>Operations Dashboard</h2>
         <div class="cards">
+          ${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}
+          ${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}
+          ${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}
+          ${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}
+          ${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}
+          ${metricCard('Upcoming Scheduled (Next 7 Days)', metrics.upcomingScheduledVisits)}
+          ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
           ${metricCard('Completed Unbilled Visits', metrics.completedUnbilledVisits)}
           ${metricCard('Draft Invoices', metrics.draftInvoices)}
           ${metricCard('Unpaid Invoices', metrics.unpaidInvoices)}
           ${metricCard('Overdue Invoices', metrics.overdueInvoices)}
           ${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}
         </div>
-        <button class="primary" data-nav="batch">Generate Batch Invoices</button>
+        <button class="primary" data-nav="batch">Open Ready to Bill</button>
       </section>
     `;
   }
@@ -110,7 +118,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
   if (view === 'batch') {
     return `
       <section>
-        <h2>Batch Invoice Generator</h2>
+        <h2>Ready to Bill</h2>
         <p>Select a date range to invoice completed, unbilled visits and group by customer.</p>
         <form id="batch-form" class="panel">
           <label>Start Date<input type="date" name="start" value="2026-04-01" required/></label>
