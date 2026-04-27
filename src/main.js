@@ -31,6 +31,25 @@ function currency(amount) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
+function getCustomerBalance(customerId) {
+  const today = new Date().toISOString().slice(0, 10);
+  return state.invoices.reduce(
+    (totals, invoice) => {
+      if (invoice.customer_id !== customerId) return totals;
+      if (invoice.payment_status === 'paid') return totals;
+      const remaining = Number((invoice.total - (invoice.amount_paid || 0)).toFixed(2));
+      if (remaining <= 0) return totals;
+
+      totals.outstanding += remaining;
+      if (invoice.payment_status === 'overdue' || invoice.due_date < today) {
+        totals.overdue += remaining;
+      }
+      return totals;
+    },
+    { outstanding: 0, overdue: 0 }
+  );
+}
+
 function ensureRouteVisitsForDate(targetDate) {
   const customerMap = getCustomerMap(state);
   const recurringFrequencies = new Set(['weekly', 'biweekly', 'monthly']);
@@ -137,9 +156,12 @@ function renderView(view, metrics, customerMap, propertyMap) {
 
   if (view === 'customers') {
     return `<section><h2>Customers</h2><div class="stack">${state.customers
-      .map(
-        (c) => `<article class="panel"><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p><p>${c.billing_address}</p><p>Status: ${c.status}</p></article>`
-      )
+      .map((c) => {
+        const balance = getCustomerBalance(c.customer_id);
+        const paidUp = balance.outstanding <= 0;
+        const overdue = balance.overdue > 0;
+        return `<article class="panel"><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p><p>${c.billing_address}</p><p>Status: ${c.status}</p><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button></div></article>`;
+      })
       .join('')}</div></section>`;
   }
 
@@ -341,6 +363,13 @@ function bindEvents() {
       render();
     });
   }
+
+  app.querySelectorAll('[data-ledger]').forEach((button) => {
+    button.addEventListener('click', () => {
+      flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`;
+      render();
+    });
+  });
 }
 
 if ('serviceWorker' in navigator) {
