@@ -16,6 +16,7 @@ body { margin: 0; }
 .sidebar h1 { font-size: 1.1rem; margin: 0 0 1rem; }
 .content { padding: 1rem; padding-bottom: 5rem; }
 .cards { display: grid; gap: 0.75rem; grid-template-columns: 1fr 1fr; }
+.summary-cards, .snapshot-cards { display: grid; gap: 0.75rem; grid-template-columns: 1fr; }
 .card, .panel {
   background: #fff;
   border-radius: 0.75rem;
@@ -93,4 +94,6 @@ input, select {
   .content { padding: 1.5rem 2rem; }
   .bottom-nav { display: none; }
   .cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .summary-cards { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .snapshot-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }

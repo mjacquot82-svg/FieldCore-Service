@@ -153,6 +153,9 @@ export function computeDashboard(state) {
   const draftInvoices = state.invoices.filter((invoice) => invoice.payment_status === 'draft').length;
   const unpaidInvoices = state.invoices.filter((invoice) => ['sent', 'partial', 'overdue', 'draft'].includes(invoice.payment_status)).length;
   const overdueInvoices = state.invoices.filter((invoice) => invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today)).length;
+  const overdueAmount = state.invoices
+    .filter((invoice) => invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today))
+    .reduce((sum, invoice) => sum + (invoice.total - (invoice.amount_paid || 0)), 0);
   const totalOutstanding = state.invoices
     .filter((invoice) => invoice.payment_status !== 'paid')
     .reduce((sum, invoice) => sum + (invoice.total - (invoice.amount_paid || 0)), 0);
@@ -169,6 +172,7 @@ export function computeDashboard(state) {
     draftInvoices,
     unpaidInvoices,
     overdueInvoices,
+    overdueAmount: Number(overdueAmount.toFixed(2)),
     totalOutstanding: Number(totalOutstanding.toFixed(2))
   };
 }

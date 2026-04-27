@@ -135,21 +135,32 @@ function renderView(view, metrics, customerMap, propertyMap) {
     return `
       <section>
         <h2>Operations Dashboard</h2>
-        <div class="cards">
+        <div class="summary-cards">
           ${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}
           ${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}
           ${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}
           ${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}
           ${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}
-          ${metricCard('Upcoming Scheduled (Next 7 Days)', metrics.upcomingScheduledVisits)}
-          ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
-          ${metricCard('Completed Unbilled Visits', metrics.completedUnbilledVisits)}
-          ${metricCard('Draft Invoices', metrics.draftInvoices)}
-          ${metricCard('Unpaid Invoices', metrics.unpaidInvoices)}
-          ${metricCard('Overdue Invoices', metrics.overdueInvoices)}
           ${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}
+          ${metricCard('Overdue Amount', currency(metrics.overdueAmount))}
+          ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
         </div>
-        <button class="primary" data-nav="batch">Open Ready to Bill</button>
+      </section>
+      <section class="panel">
+        <h3>Today’s Priorities</h3>
+        <ul>
+          <li>${metrics.todayScheduledVisits} visits scheduled</li>
+          <li>${metrics.overdueInvoices} invoices overdue</li>
+          <li>${metrics.readyToBillVisits} visits ready to bill</li>
+        </ul>
+      </section>
+      <section class="panel">
+        <h3>Financial Snapshot</h3>
+        <div class="snapshot-cards">
+          ${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}
+          ${metricCard('Overdue Amount', currency(metrics.overdueAmount))}
+          ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
+        </div>
       </section>
     `;
   }
