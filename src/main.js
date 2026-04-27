@@ -19,8 +19,6 @@ const navItems = [
   ['dashboard', 'Dashboard'],
   ['today-route', 'Today’s Route'],
   ['customers', 'Customers'],
-  ['properties', 'Properties'],
-  ['visits', 'Service Visits'],
   ['batch', 'Ready to Bill'],
   ['invoices', 'Invoices'],
   ['payments', 'Payments'],
@@ -117,7 +115,6 @@ function render() {
       </main>
       <nav class="bottom-nav">
         ${navItems
-          .slice(0, 6)
           .map(
             ([id, label]) =>
               `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`
@@ -174,7 +171,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
         const balance = getCustomerBalance(c.customer_id);
         const paidUp = balance.outstanding <= 0;
         const overdue = balance.overdue > 0;
-        return `<article class="panel"><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p><p>${c.billing_address}</p><p>Status: ${c.status}</p><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button></div></article>`;
+        return `<article class="panel"><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p><p>${c.billing_address}</p><p>Status: ${c.status}</p><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-nav="properties">View Properties</button><button data-nav="visits">View Visit History</button></div></article>`;
       })
       .join('')}</div></section>`;
   }
