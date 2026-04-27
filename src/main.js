@@ -64,6 +64,10 @@ function renderCustomerLetterFilter() {
   return `<div class="letter-filter panel"><button class="${selectedCustomerLetter === 'all' ? 'active' : ''}" data-letter-filter="all">All</button>${letters.map((l) => `<button class="${selectedCustomerLetter === l ? 'active' : ''}" data-letter-filter="${l}">${l}</button>`).join('')}</div>`;
 }
 
+function renderCustomerForm() {
+  return `<form id="customer-form" class="panel service-form"><h3>Add Customer</h3><label>Name<input name="name" placeholder="Customer or business name" required /></label><label>Phone<input name="phone" placeholder="555-123-4567" /></label><label>Email<input name="email" type="email" placeholder="customer@example.com" /></label><label>Billing Address<input name="billing_address" placeholder="Billing address" /></label><button class="primary" type="submit">Add Customer</button></form>`;
+}
+
 function buildCustomerTimeline(customerId, customerMap, propertyMap) {
   const properties = customerProperties(customerId);
   const propertyIds = new Set(properties.map((p) => p.property_id));
@@ -96,7 +100,14 @@ function buildCustomerTimeline(customerId, customerMap, propertyMap) {
       title: `Payment received · ${currency(p.amount)}`,
       detail: p.method || p.notes || 'Payment recorded'
     }));
-  return [...serviceEvents, ...visitEvents, ...invoiceEvents, ...paymentEvents].sort((a, b) => {
+  const customer = state.customers.find((c) => c.customer_id === customerId);
+  const customerEvent = customer ? [{
+    date: customer.created_at?.slice(0, 10) || 'Unknown date',
+    type: customer.status === 'inactive' ? 'Customer inactive' : 'Customer added',
+    title: customer.name,
+    detail: `${customer.phone || 'No phone'} · ${customer.email || 'No email'}`
+  }] : [];
+  return [...customerEvent, ...serviceEvents, ...visitEvents, ...invoiceEvents, ...paymentEvents].sort((a, b) => {
     if (a.date === 'Unknown date') return 1;
     if (b.date === 'Unknown date') return -1;
     return b.date.localeCompare(a.date);
@@ -151,12 +162,12 @@ function renderDashboard(metrics) {
 
 function renderCustomers() {
   const customers = getFilteredCustomers();
-  return `<section><h2>Customers</h2>${renderCustomerLetterFilter()}<div class="stack">${customers.length ? customers.map((c) => {
+  return `<section><h2>Customers</h2>${renderCustomerForm()}${renderCustomerLetterFilter()}<div class="stack">${customers.length ? customers.map((c) => {
     const balance = getCustomerBalance(c.customer_id);
     const summary = getCustomerSummary(c.customer_id);
     const paidUp = balance.outstanding <= 0;
     const overdue = balance.overdue > 0;
-    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">Manage Services</button><button data-customer-nav="visits:${c.customer_id}">View Visit History</button><button data-customer-nav="timeline:${c.customer_id}">Timeline</button></div></article>`;
+    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone || 'No phone'} · ${c.email || 'No email'}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address || 'No billing address'}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">Manage Services</button><button data-customer-nav="visits:${c.customer_id}">View Visit History</button><button data-customer-nav="timeline:${c.customer_id}">Timeline</button><button data-customer-edit="${c.customer_id}">Edit Customer</button><button data-customer-remove="${c.customer_id}">Remove Customer</button></div></article>`;
   }).join('') : '<article class="panel"><p>No customers found for this letter.</p></article>'}</div></section>`;
 }
 
@@ -211,6 +222,10 @@ function bindEvents() {
   app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.nav; selectedCustomerId = ''; flashMessage = ''; render(); }));
   app.querySelectorAll('[data-letter-filter]').forEach((button) => button.addEventListener('click', () => { selectedCustomerLetter = button.dataset.letterFilter; render(); }));
   app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => { const [view, customerId] = button.dataset.customerNav.split(':'); activeView = view; selectedCustomerId = customerId; flashMessage = ''; render(); }));
+  const customerForm = app.querySelector('#customer-form');
+  if (customerForm) customerForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(customerForm); const name = String(formData.get('name') || '').trim(); if (!name) return; state.customers = [...state.customers, { customer_id: makeId('cust'), company_id: state.company.company_id, name, phone: formData.get('phone') || '', email: formData.get('email') || '', billing_address: formData.get('billing_address') || '', status: 'active', created_at: new Date().toISOString() }]; selectedCustomerLetter = 'all'; saveState(state); flashMessage = 'Customer added.'; render(); });
+  app.querySelectorAll('[data-customer-edit]').forEach((button) => button.addEventListener('click', () => { const customerId = button.dataset.customerEdit; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; const name = window.prompt('Customer name:', customer.name); if (!name) return; const phone = window.prompt('Phone:', customer.phone || ''); if (phone === null) return; const email = window.prompt('Email:', customer.email || ''); if (email === null) return; const billingAddress = window.prompt('Billing address:', customer.billing_address || ''); if (billingAddress === null) return; const status = window.prompt('Status (active or inactive):', customer.status || 'active'); if (!status) return; state.customers = state.customers.map((c) => c.customer_id === customerId ? { ...c, name, phone, email, billing_address: billingAddress, status } : c); saveState(state); flashMessage = 'Customer updated.'; render(); }));
+  app.querySelectorAll('[data-customer-remove]').forEach((button) => button.addEventListener('click', () => { const customerId = button.dataset.customerRemove; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; if (!window.confirm(`Remove ${customer.name}? This will mark the customer inactive and keep history.`)) return; state.customers = state.customers.map((c) => c.customer_id === customerId ? { ...c, status: 'inactive' } : c); state.properties = state.properties.map((p) => p.customer_id === customerId ? { ...p, status: 'inactive' } : p); saveState(state); flashMessage = 'Customer removed from active work.'; render(); }));
   const serviceForm = app.querySelector('#service-form');
   if (serviceForm && selectedCustomerId) serviceForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(serviceForm); state.properties = [...state.properties, { property_id: makeId('prop'), company_id: state.company.company_id, customer_id: selectedCustomerId, service_address: formData.get('service_address'), service_type: formData.get('service_type'), recurring_frequency: formData.get('recurring_frequency'), default_price: Number(formData.get('default_price') || 0), status: 'active', notes: formData.get('notes') || '', created_at: new Date().toISOString() }]; saveState(state); flashMessage = 'Service added.'; render(); });
   const oneOffForm = app.querySelector('#one-off-form');
