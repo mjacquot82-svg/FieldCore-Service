@@ -13,9 +13,11 @@ const app = document.querySelector('#app');
 let state = loadState();
 let activeView = 'dashboard';
 let flashMessage = '';
+let selectedRouteDate = new Date().toISOString().slice(0, 10);
 
 const navItems = [
   ['dashboard', 'Dashboard'],
+  ['today-route', 'Today’s Route'],
   ['customers', 'Customers'],
   ['properties', 'Properties'],
   ['visits', 'Service Visits'],
@@ -52,7 +54,7 @@ function render() {
       </main>
       <nav class="bottom-nav">
         ${navItems
-          .slice(0, 5)
+          .slice(0, 6)
           .map(
             ([id, label]) =>
               `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`
@@ -113,6 +115,31 @@ function renderView(view, metrics, customerMap, propertyMap) {
         return `<article class="panel"><h3>${v.visit_date} · ${v.service_description}</h3><p>${property?.service_address ?? 'Unknown property'}</p><p>Price ${currency(v.price)} · Status: ${v.status}</p></article>`;
       })
       .join('')}</div></section>`;
+  }
+
+  if (view === 'today-route') {
+    const routeVisits = state.visits.filter((visit) => visit.visit_date === selectedRouteDate);
+    return `
+      <section>
+        <h2>Today’s Route / Daily Work List</h2>
+        <div class="panel">
+          <label>Select Date<input type="date" id="route-date" value="${selectedRouteDate}" /></label>
+        </div>
+        <div class="stack">
+          ${
+            routeVisits.length
+              ? routeVisits
+                  .map((visit) => {
+                    const property = propertyMap[visit.property_id];
+                    const customer = customerMap[property?.customer_id];
+                    return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${visit.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Price ${currency(visit.price)}</p><p>Notes: ${visit.notes || 'None'}</p><p>Status: ${visit.status}</p><div class="actions"><button data-visit-action="${visit.visit_id}:complete">Mark Completed</button><button data-visit-action="${visit.visit_id}:skip">Mark Skipped</button><button data-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button></div></article>`;
+                  })
+                  .join('')
+              : '<article class="panel"><p>No visits found for this date.</p></article>'
+          }
+        </div>
+      </section>
+    `;
   }
 
   if (view === 'batch') {
@@ -208,10 +235,64 @@ function bindEvents() {
     });
   });
 
+  const routeDateInput = app.querySelector('#route-date');
+  if (routeDateInput) {
+    routeDateInput.addEventListener('change', () => {
+      selectedRouteDate = routeDateInput.value;
+      render();
+    });
+  }
+
+  app.querySelectorAll('[data-visit-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [visitId, action] = button.dataset.visitAction.split(':');
+      if (action === 'complete') {
+        state.visits = state.visits.map((visit) =>
+          visit.visit_id === visitId ? { ...visit, status: 'completed' } : visit
+        );
+        flashMessage = `Visit ${visitId} marked completed.`;
+      }
+
+      if (action === 'skip') {
+        state.visits = state.visits.map((visit) =>
+          visit.visit_id === visitId ? { ...visit, status: 'skipped' } : visit
+        );
+        flashMessage = `Visit ${visitId} marked skipped.`;
+      }
+
+      if (action === 'skip-reschedule') {
+        const sourceVisit = state.visits.find((visit) => visit.visit_id === visitId);
+        if (!sourceVisit) return;
+        const suggested = new Date(sourceVisit.visit_date);
+        suggested.setDate(suggested.getDate() + 7);
+        const suggestedDate = suggested.toISOString().slice(0, 10);
+        const nextDate = window.prompt('Reschedule visit to date (YYYY-MM-DD):', suggestedDate);
+        if (!nextDate) return;
+        state.visits = state.visits.flatMap((visit) => {
+          if (visit.visit_id !== visitId) return [visit];
+          return [
+            { ...visit, status: 'skipped' },
+            {
+              ...visit,
+              visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
+              visit_date: nextDate,
+              status: 'scheduled',
+              created_at: new Date().toISOString()
+            }
+          ];
+        });
+        flashMessage = `Visit ${visitId} skipped and rescheduled to ${nextDate}.`;
+      }
+      saveState(state);
+      render();
+    });
+  });
+
   const resetButton = app.querySelector('#reset-seed');
   if (resetButton) {
     resetButton.addEventListener('click', () => {
       state = resetSeed();
+      selectedRouteDate = new Date().toISOString().slice(0, 10);
       flashMessage = 'Seed data restored.';
       render();
     });
