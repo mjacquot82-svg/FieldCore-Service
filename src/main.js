@@ -14,6 +14,7 @@ let state = loadState();
 let activeView = 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
+let selectedCustomerId = '';
 
 const navItems = [
   ['dashboard', 'Dashboard'],
@@ -68,6 +69,10 @@ function getCustomerSummary(customerId) {
     activeRecurringServices,
     lastVisitDate: lastVisit?.visit_date ?? 'No visits yet'
   };
+}
+
+function getSelectedCustomer() {
+  return selectedCustomerId ? state.customers.find((customer) => customer.customer_id === selectedCustomerId) : null;
 }
 
 function ensureRouteVisitsForDate(targetDate) {
@@ -194,27 +199,44 @@ function renderView(view, metrics, customerMap, propertyMap) {
         const summary = getCustomerSummary(c.customer_id);
         const paidUp = balance.outstanding <= 0;
         const overdue = balance.overdue > 0;
-        return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-nav="properties">View Properties</button><button data-nav="visits">View Visit History</button></div></article>`;
+        return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone} · ${c.email}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Visit</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">View Properties</button><button data-customer-nav="visits:${c.customer_id}">View Visit History</button></div></article>`;
       })
       .join('')}</div></section>`;
   }
 
   if (view === 'properties') {
-    return `<section><h2>Properties / Service Locations</h2><div class="stack">${state.properties
-      .map((p) => {
-        const customer = customerMap[p.customer_id];
-        return `<article class="panel"><h3>${p.service_address}</h3><p>${customer?.name ?? 'Unknown Customer'}</p><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p></article>`;
-      })
-      .join('')}</div></section>`;
+    const selectedCustomer = getSelectedCustomer();
+    const properties = selectedCustomerId
+      ? state.properties.filter((property) => property.customer_id === selectedCustomerId)
+      : state.properties;
+    return `<section><h2>${selectedCustomer ? `${selectedCustomer.name} Properties / Service Locations` : 'Properties / Service Locations'}</h2>${selectedCustomer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}<div class="stack">${properties.length
+      ? properties
+          .map((p) => {
+            const customer = customerMap[p.customer_id];
+            return `<article class="panel"><h3>${p.service_address}</h3><p>${customer?.name ?? 'Unknown Customer'}</p><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p></article>`;
+          })
+          .join('')
+      : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
   }
 
   if (view === 'visits') {
-    return `<section><h2>Service Visits</h2><div class="stack">${state.visits
-      .map((v) => {
-        const property = propertyMap[v.property_id];
-        return `<article class="panel"><h3>${v.visit_date} · ${v.service_description}</h3><p>${property?.service_address ?? 'Unknown property'}</p><p>Price ${currency(v.price)} · Status: ${v.status}</p></article>`;
-      })
-      .join('')}</div></section>`;
+    const selectedCustomer = getSelectedCustomer();
+    const selectedPropertyIds = new Set(
+      state.properties
+        .filter((property) => !selectedCustomerId || property.customer_id === selectedCustomerId)
+        .map((property) => property.property_id)
+    );
+    const visits = selectedCustomerId
+      ? state.visits.filter((visit) => selectedPropertyIds.has(visit.property_id))
+      : state.visits;
+    return `<section><h2>${selectedCustomer ? `${selectedCustomer.name} Visit History` : 'Service Visits'}</h2>${selectedCustomer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}<div class="stack">${visits.length
+      ? visits
+          .map((v) => {
+            const property = propertyMap[v.property_id];
+            return `<article class="panel"><h3>${v.visit_date} · ${v.service_description}</h3><p>${property?.service_address ?? 'Unknown property'}</p><p>Price ${currency(v.price)} · Status: ${v.status}</p></article>`;
+          })
+          .join('')
+      : '<article class="panel"><p>No visits found for this customer.</p></article>'}</div></section>`;
   }
 
   if (view === 'today-route') {
@@ -305,6 +327,17 @@ function bindEvents() {
   app.querySelectorAll('[data-nav]').forEach((button) => {
     button.addEventListener('click', () => {
       activeView = button.dataset.nav;
+      selectedCustomerId = '';
+      flashMessage = '';
+      render();
+    });
+  });
+
+  app.querySelectorAll('[data-customer-nav]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [view, customerId] = button.dataset.customerNav.split(':');
+      activeView = view;
+      selectedCustomerId = customerId;
       flashMessage = '';
       render();
     });
@@ -321,6 +354,7 @@ function bindEvents() {
       saveState(state);
       flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`;
       activeView = 'invoices';
+      selectedCustomerId = '';
       render();
     });
   }
@@ -393,6 +427,7 @@ function bindEvents() {
     resetButton.addEventListener('click', () => {
       state = resetSeed();
       selectedRouteDate = new Date().toISOString().slice(0, 10);
+      selectedCustomerId = '';
       flashMessage = 'Seed data restored.';
       render();
     });
