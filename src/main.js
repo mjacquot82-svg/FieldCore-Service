@@ -133,19 +133,7 @@ function render() {
 function renderView(view, metrics, customerMap, propertyMap) {
   if (view === 'dashboard') {
     return `
-      <section>
-        <h2>Operations Dashboard</h2>
-        <div class="summary-cards">
-          ${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}
-          ${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}
-          ${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}
-          ${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}
-          ${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}
-          ${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}
-          ${metricCard('Overdue Amount', currency(metrics.overdueAmount))}
-          ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
-        </div>
-      </section>
+      <section><h2>Operations Dashboard</h2></section>
       <section class="panel">
         <h3>Today’s Priorities</h3>
         <ul>
@@ -155,8 +143,23 @@ function renderView(view, metrics, customerMap, propertyMap) {
         </ul>
       </section>
       <section class="panel">
+        <h3>Today’s Visits</h3>
+        <div class="overview-cards">
+          ${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}
+          ${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}
+          ${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}
+        </div>
+      </section>
+      <section class="panel">
+        <h3>Billing Queue</h3>
+        <div class="overview-cards">
+          ${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}
+          ${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}
+        </div>
+      </section>
+      <section class="panel">
         <h3>Financial Snapshot</h3>
-        <div class="snapshot-cards">
+        <div class="overview-cards">
           ${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}
           ${metricCard('Overdue Amount', currency(metrics.overdueAmount))}
           ${metricCard('Paid This Month', currency(metrics.paidThisMonth))}
