@@ -320,36 +320,6 @@
   }
 }
 
-@media (min-width: 1040px) {
-  .route-builder-form {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 1rem;
-    align-items: start;
-  }
-
-  .route-form-header {
-    grid-column: 1 / -1;
-  }
-
-  .route-form-grid {
-    grid-template-columns: 1fr;
-    max-width: none;
-    position: sticky;
-    top: 1rem;
-    align-self: start;
-  }
-
-  .route-builder-form h4,
-  .route-stop-list {
-    grid-column: 2;
-  }
-
-  .route-stop-list {
-    max-width: none;
-  }
-}
-
 @media (min-width: 920px) {
   section:has(.customer-card) > .stack {
     grid-template-columns: repeat(2, minmax(360px, 1fr));
