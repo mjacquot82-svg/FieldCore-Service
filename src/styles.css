@@ -220,6 +220,26 @@ input, select {
   font-size: 0.9rem;
 }
 
+/* Compact utility controls */
+.session-banner,
+.overdue-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.88rem;
+}
+.session-banner button,
+.overdue-alert button {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.5rem;
+  font-size: 0.82rem;
+}
+
 @media (min-width: 720px) {
   .customer-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .service-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -233,4 +253,13 @@ input, select {
   .cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .overview-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .customer-card .actions button { flex-basis: 110px; }
+  section:has(.customer-card) > .stack {
+    grid-template-columns: repeat(2, minmax(360px, 1fr));
+    align-items: start;
+  }
+}
+@media (min-width: 1400px) {
+  section:has(.customer-card) > .stack {
+    grid-template-columns: repeat(3, minmax(340px, 1fr));
+  }
 }
