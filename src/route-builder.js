@@ -51,18 +51,40 @@ function scheduledVisitsForDate(state, date) {
     .sort((a, b) => (a.service_description || '').localeCompare(b.service_description || ''));
 }
 
-function renderVisitCheckbox(visit, customers, properties) {
+function getRouteMetrics(visits, savedRoutes) {
+  const routedVisitIds = new Set(savedRoutes.flatMap((route) => route.visit_ids || []));
+  const unassignedStops = visits.filter((visit) => !routedVisitIds.has(visit.visit_id)).length;
+  const totalValue = visits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
+  return { routedVisitIds, unassignedStops, totalValue };
+}
+
+function renderRouteStat(label, value) {
+  return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
+}
+
+function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new Set()) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
-  const label = `${customer?.name || 'Unknown Customer'} · ${property?.service_address || 'Unknown address'} · ${visit.service_description}`;
+  const isRouted = routedVisitIds.has(visit.visit_id);
+  const city = (property?.service_address || '').split(',').slice(-2, -1)[0]?.trim();
 
   return `
-    <label class="route-stop-option">
-      <input type="checkbox" name="visit_id" value="${visit.visit_id}" />
-      <span>
-        <strong>${label}</strong>
-        <small>${property?.service_type || 'Service'} · ${currency(visit.price)} · ${visit.notes || 'No notes'}</small>
-      </span>
+    <label class="route-stop-card ${isRouted ? 'already-routed' : ''}">
+      <input type="checkbox" name="visit_id" value="${visit.visit_id}" ${isRouted ? 'disabled' : ''} />
+      <div class="route-stop-main">
+        <div class="route-stop-title-row">
+          <strong>${customer?.name || 'Unknown Customer'}</strong>
+          <span class="badge ${isRouted ? 'outstanding' : 'paid-up'}">${isRouted ? 'Routed' : 'Open'}</span>
+        </div>
+        <p>${property?.service_address || 'Unknown address'}</p>
+        <div class="route-stop-meta">
+          <span>${property?.recurring_frequency || 'one-time'}</span>
+          <span>${property?.service_type || 'Service'}</span>
+          <span>${currency(visit.price)}</span>
+          ${city ? `<span>${city}</span>` : ''}
+        </div>
+        ${visit.notes ? `<small>${visit.notes}</small>` : ''}
+      </div>
     </label>
   `;
 }
@@ -72,21 +94,22 @@ function renderSavedRoute(route, state) {
   const properties = propertyMap(state);
   const visitsById = new Map((state.visits || []).map((visit) => [visit.visit_id, visit]));
   const routeVisits = (route.visit_ids || []).map((visitId) => visitsById.get(visitId)).filter(Boolean);
+  const routeTotal = routeVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
 
   return `
     <article class="panel route-summary-card">
       <div class="customer-card-header">
         <div>
           <h3>${route.name}</h3>
-          <p>${route.route_date} · ${route.assigned_worker || 'Unassigned'}</p>
+          <p>${route.route_date} · ${route.assigned_worker || 'Unassigned'} · ${currency(routeTotal)}</p>
         </div>
         <span class="badge paid-up">${routeVisits.length} stops</span>
       </div>
-      <ol>
+      <ol class="route-saved-stop-list">
         ${routeVisits.map((visit) => {
           const property = properties[visit.property_id];
           const customer = customers[property?.customer_id];
-          return `<li>${customer?.name || 'Unknown Customer'} · ${property?.service_address || 'Unknown address'} · ${visit.service_description}</li>`;
+          return `<li><strong>${customer?.name || 'Unknown Customer'}</strong><span>${property?.service_address || 'Unknown address'} · ${visit.service_description}</span></li>`;
         }).join('') || '<li>No stops found.</li>'}
       </ol>
     </article>
@@ -104,33 +127,54 @@ function renderRouteBuilder(date = today()) {
   const properties = propertyMap(state);
   const visits = scheduledVisitsForDate(state, date);
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
+  const metrics = getRouteMetrics(visits, savedRoutes);
 
   main.innerHTML = `
-    <section>
-      <h2>Route Builder</h2>
-      <div class="panel">
+    <section class="route-builder-view">
+      <div class="route-builder-header">
+        <div>
+          <h2>Route Builder</h2>
+          <p>Build daily routes from scheduled visits without changing the recurring schedule engine.</p>
+        </div>
         <label>Select route date
           <input type="date" id="route-builder-date" value="${date}" />
         </label>
       </div>
 
-      <form id="route-builder-form" class="panel service-form">
-        <h3>Create Route</h3>
-        <label>Route Name
-          <input name="route_name" placeholder="Monday North Route" required />
-        </label>
-        <label>Assign Worker
-          <input name="assigned_worker" placeholder="Worker name" />
-        </label>
+      <div class="route-stat-grid">
+        ${renderRouteStat('Scheduled stops', visits.length)}
+        ${renderRouteStat('Unassigned stops', metrics.unassignedStops)}
+        ${renderRouteStat('Saved routes', savedRoutes.length)}
+        ${renderRouteStat('Route value', currency(metrics.totalValue))}
+      </div>
+
+      <form id="route-builder-form" class="panel service-form route-builder-form">
+        <div class="route-form-header">
+          <div>
+            <h3>Create Route</h3>
+            <p>Select open stops, assign a worker, then save the route.</p>
+          </div>
+          <button class="primary" type="submit" ${metrics.unassignedStops ? '' : 'disabled'}>Save Route</button>
+        </div>
+        <div class="route-form-grid">
+          <label>Route Name
+            <input name="route_name" placeholder="Monday North Route" required />
+          </label>
+          <label>Assign Worker
+            <input name="assigned_worker" placeholder="Worker name" />
+          </label>
+        </div>
         <h4>Scheduled Stops for ${date}</h4>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties)).join('') : '<p>No scheduled visits found for this date.</p>'}
+          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this date.</p>'}
         </div>
-        <button class="primary" type="submit" ${visits.length ? '' : 'disabled'}>Save Route</button>
       </form>
 
-      <h3>Saved Routes for ${date}</h3>
-      <div class="stack">
+      <div class="route-section-header">
+        <h3>Saved Routes for ${date}</h3>
+        <span>${savedRoutes.length} routes</span>
+      </div>
+      <div class="stack route-saved-stack">
         ${savedRoutes.length ? savedRoutes.map((route) => renderSavedRoute(route, state)).join('') : '<article class="panel"><p>No saved routes for this date yet.</p></article>'}
       </div>
     </section>
