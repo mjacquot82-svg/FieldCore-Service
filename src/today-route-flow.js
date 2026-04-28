@@ -13,6 +13,10 @@ function loadState() {
   }
 }
 
+function saveState(state) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
 function customerMap(state) {
   return Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
 }
@@ -88,9 +92,9 @@ function renderRouteStop(visit, index, customers, properties, firstOpenVisitId) 
       <p>Notes: ${visit.notes || 'None'}</p>
       <p>Status: ${visit.status}</p>
       <div class="actions">
-        <button data-visit-action="${visit.visit_id}:complete">Mark Completed</button>
-        <button data-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
-        <button data-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
+        <button data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
+        <button data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
+        <button data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
       </div>
     </article>
   `;
@@ -148,6 +152,70 @@ function enhanceTodayRoute() {
       </div>
     </article>
   `;
+
+  bindFlowVisitActions(section);
+}
+
+function updateVisitStatus(visitId, status) {
+  const state = loadState();
+  if (!state) return;
+
+  state.visits = (state.visits || []).map((visit) =>
+    visit.visit_id === visitId
+      ? { ...visit, status, completed_at: status === 'completed' ? new Date().toISOString() : visit.completed_at }
+      : visit
+  );
+
+  saveState(state);
+  const currentSection = document.querySelector('main.content section.today-route-flow');
+  if (currentSection) currentSection.dataset.todayRouteFlow = 'false';
+  scheduleEnhancement();
+}
+
+function skipAndRescheduleVisit(visitId) {
+  const state = loadState();
+  if (!state) return;
+
+  const visit = (state.visits || []).find((item) => item.visit_id === visitId);
+  if (!visit) return;
+
+  const nextDate = window.prompt('Reschedule date (YYYY-MM-DD):', visit.visit_date || new Date().toISOString().slice(0, 10));
+  if (!nextDate) return;
+
+  state.visits = (state.visits || []).map((item) =>
+    item.visit_id === visitId
+      ? { ...item, status: 'skipped', skipped_at: new Date().toISOString(), rescheduled_to: nextDate }
+      : item
+  );
+
+  state.visits = [
+    ...(state.visits || []),
+    {
+      ...visit,
+      visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
+      visit_date: nextDate,
+      status: 'scheduled',
+      notes: visit.notes || 'Rescheduled visit',
+      created_at: new Date().toISOString()
+    }
+  ];
+
+  saveState(state);
+  const currentSection = document.querySelector('main.content section.today-route-flow');
+  if (currentSection) currentSection.dataset.todayRouteFlow = 'false';
+  scheduleEnhancement();
+}
+
+function bindFlowVisitActions(section) {
+  section.querySelectorAll('[data-flow-visit-action]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const [visitId, action] = button.dataset.flowVisitAction.split(':');
+      if (!visitId || !action) return;
+      if (action === 'complete') updateVisitStatus(visitId, 'completed');
+      if (action === 'skip') updateVisitStatus(visitId, 'skipped');
+      if (action === 'skip-reschedule') skipAndRescheduleVisit(visitId);
+    });
+  });
 }
 
 let scheduled = false;
@@ -156,6 +224,8 @@ function scheduleEnhancement() {
   scheduled = true;
   window.requestAnimationFrame(() => {
     scheduled = false;
+    const currentSection = document.querySelector('main.content section.today-route-flow');
+    if (currentSection) delete currentSection.dataset.todayRouteFlow;
     enhanceTodayRoute();
   });
 }
