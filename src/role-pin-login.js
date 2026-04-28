@@ -158,7 +158,7 @@ function addLogoutControl(session) {
   const banner = document.createElement('div');
   banner.className = 'flash session-banner';
   banner.setAttribute('data-session-banner', 'true');
-  banner.innerHTML = `Logged in as <strong>${session.name}</strong> (${session.role}) <button data-logout class="primary">Logout</button>`;
+  banner.innerHTML = `<strong>${session.name}</strong><span>(${session.role})</span><button data-logout class="primary">Logout</button>`;
   main.prepend(banner);
 
   const button = banner.querySelector('[data-logout]');
