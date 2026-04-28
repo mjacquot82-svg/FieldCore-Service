@@ -8,6 +8,7 @@ const currency = (amount) => new Intl.NumberFormat('en-US', {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const makeRouteId = () => `route_${crypto.randomUUID().slice(0, 8)}`;
+const routeDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function loadState() {
   try {
@@ -27,6 +28,12 @@ function customerMap(state) {
 
 function propertyMap(state) {
   return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
+}
+
+function weekdayForDate(date) {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return 'Monday';
+  return parsed.toLocaleDateString('en-US', { weekday: 'long' });
 }
 
 function addRouteBuilderNav() {
@@ -62,6 +69,10 @@ function renderRouteStat(label, value) {
   return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
 }
 
+function renderRouteDaySelect(selectedDay) {
+  return `<select name="route_day" required>${routeDays.map((day) => `<option value="${day}" ${day === selectedDay ? 'selected' : ''}>${day}</option>`).join('')}</select>`;
+}
+
 function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new Set()) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
@@ -95,13 +106,14 @@ function renderSavedRoute(route, state) {
   const visitsById = new Map((state.visits || []).map((visit) => [visit.visit_id, visit]));
   const routeVisits = (route.visit_ids || []).map((visitId) => visitsById.get(visitId)).filter(Boolean);
   const routeTotal = routeVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
+  const routeDay = route.route_day || weekdayForDate(route.route_date);
 
   return `
     <article class="panel route-summary-card">
       <div class="customer-card-header">
         <div>
-          <h3>${route.name}</h3>
-          <p>${route.route_date} · ${route.assigned_worker || 'Unassigned'} · ${currency(routeTotal)}</p>
+          <h3>${routeDay} · ${route.name}</h3>
+          <p>${route.assigned_worker || 'Unassigned'} · preview ${route.route_date} · ${currency(routeTotal)}</p>
         </div>
         <span class="badge paid-up">${routeVisits.length} stops</span>
       </div>
@@ -125,23 +137,25 @@ function renderRouteBuilder(date = today()) {
 
   const customers = customerMap(state);
   const properties = propertyMap(state);
+  const routeDay = weekdayForDate(date);
   const visits = scheduledVisitsForDate(state, date);
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
   const metrics = getRouteMetrics(visits, savedRoutes);
 
   main.innerHTML = `
     <section class="route-builder-view">
-      <div class="route-builder-header">
+      <div class="route-builder-header panel">
         <div>
           <h2>Route Builder</h2>
-          <p>Build daily routes from scheduled visits without changing the recurring schedule engine.</p>
+          <p>Build weekday routes by worker. The date is a preview for scheduled stops only.</p>
         </div>
-        <label>Select route date
+        <label>Preview scheduled visits for
           <input type="date" id="route-builder-date" value="${date}" />
         </label>
       </div>
 
       <div class="route-stat-grid">
+        ${renderRouteStat('Weekday route', routeDay)}
         ${renderRouteStat('Scheduled stops', visits.length)}
         ${renderRouteStat('Unassigned stops', metrics.unassignedStops)}
         ${renderRouteStat('Saved routes', savedRoutes.length)}
@@ -151,31 +165,34 @@ function renderRouteBuilder(date = today()) {
       <form id="route-builder-form" class="panel service-form route-builder-form">
         <div class="route-form-header">
           <div>
-            <h3>Create Route</h3>
-            <p>Select open stops, assign a worker, then save the route.</p>
+            <h3>Create Weekday Route</h3>
+            <p>Choose the weekday, assign the worker, then select stops from the preview date.</p>
           </div>
           <button class="primary" type="submit" ${metrics.unassignedStops ? '' : 'disabled'}>Save Route</button>
         </div>
         <div class="route-form-grid">
-          <label>Route Name
-            <input name="route_name" placeholder="Monday North Route" required />
+          <label>Weekday Route
+            ${renderRouteDaySelect(routeDay)}
           </label>
           <label>Assign Worker
             <input name="assigned_worker" placeholder="Worker name" />
           </label>
+          <label>Route Area / Name
+            <input name="route_name" placeholder="North Route, Franklin Route, Commercial Route" required />
+          </label>
         </div>
-        <h4>Scheduled Stops for ${date}</h4>
+        <h4>Stops available for ${routeDay} preview (${date})</h4>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this date.</p>'}
+          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
       </form>
 
       <div class="route-section-header">
-        <h3>Saved Routes for ${date}</h3>
-        <span>${savedRoutes.length} routes</span>
+        <h3>Saved ${routeDay} Routes</h3>
+        <span>${savedRoutes.length} routes for preview date ${date}</span>
       </div>
       <div class="stack route-saved-stack">
-        ${savedRoutes.length ? savedRoutes.map((route) => renderSavedRoute(route, state)).join('') : '<article class="panel"><p>No saved routes for this date yet.</p></article>'}
+        ${savedRoutes.length ? savedRoutes.map((route) => renderSavedRoute(route, state)).join('') : '<article class="panel"><p>No saved routes for this preview date yet.</p></article>'}
       </div>
     </section>
   `;
@@ -200,6 +217,7 @@ function bindRouteBuilderEvents() {
 
     const formData = new FormData(form);
     const selectedVisitIds = formData.getAll('visit_id');
+    const routeDay = String(formData.get('route_day') || weekdayForDate(getRouteBuilderDate())).trim();
     const routeName = String(formData.get('route_name') || '').trim();
     const assignedWorker = String(formData.get('assigned_worker') || '').trim();
     const routeDate = getRouteBuilderDate();
@@ -210,6 +228,7 @@ function bindRouteBuilderEvents() {
       route_id: makeRouteId(),
       company_id: state.company?.company_id,
       name: routeName,
+      route_day: routeDay,
       route_date: routeDate,
       assigned_worker: assignedWorker,
       visit_ids: selectedVisitIds,
@@ -219,7 +238,7 @@ function bindRouteBuilderEvents() {
     state.routes = [...(state.routes || []), route];
     state.visits = (state.visits || []).map((visit) =>
       selectedVisitIds.includes(visit.visit_id)
-        ? { ...visit, route_id: route.route_id, route_name: route.name, assigned_worker: route.assigned_worker }
+        ? { ...visit, route_id: route.route_id, route_name: route.name, route_day: route.route_day, assigned_worker: route.assigned_worker }
         : visit
     );
 
