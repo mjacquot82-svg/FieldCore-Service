@@ -137,7 +137,23 @@ function bindLoginEvents() {
 
 function addLogoutControl(session) {
   const main = document.querySelector('main.content');
-  if (!main || main.querySelector('[data-session-banner]')) return;
+  if (!main) return;
+
+  const existingBanners = [...document.querySelectorAll('[data-session-banner]')];
+  const existing = existingBanners[0];
+  existingBanners.slice(1).forEach((banner) => banner.remove());
+
+  if (existing) {
+    const button = existing.querySelector('[data-logout]');
+    if (button && button.dataset.boundLogout !== 'true') {
+      button.dataset.boundLogout = 'true';
+      button.addEventListener('click', () => {
+        clearSession();
+        window.location.reload();
+      });
+    }
+    return;
+  }
 
   const banner = document.createElement('div');
   banner.className = 'flash session-banner';
@@ -145,10 +161,14 @@ function addLogoutControl(session) {
   banner.innerHTML = `Logged in as <strong>${session.name}</strong> (${session.role}) <button data-logout class="primary">Logout</button>`;
   main.prepend(banner);
 
-  banner.querySelector('[data-logout]')?.addEventListener('click', () => {
-    clearSession();
-    window.location.reload();
-  });
+  const button = banner.querySelector('[data-logout]');
+  if (button) {
+    button.dataset.boundLogout = 'true';
+    button.addEventListener('click', () => {
+      clearSession();
+      window.location.reload();
+    });
+  }
 }
 
 function restrictEmployeeNav() {
