@@ -1,5 +1,13 @@
 /* FieldCore V1 compact density refinements */
 
+@media (min-width: 920px) {
+  .content {
+    max-width: 1180px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+
 .customer-card .customer-overview {
   display: flex;
   flex-wrap: wrap;
@@ -298,6 +306,53 @@
   font-size: 0.88rem;
 }
 
+/* Today route flow workspace */
+.today-route-flow .route-summary-header,
+.today-route-flow .route-summary-footer {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.route-flow-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.route-flow-stop {
+  position: relative;
+  padding-left: 1rem;
+  border-left: 4px solid #e2e8f0;
+}
+
+.route-flow-stop.completed {
+  border-left-color: #16a34a;
+}
+
+.route-flow-stop.current {
+  border-left-color: #1d4ed8;
+}
+
+.route-flow-stop.skipped {
+  border-left-color: #f97316;
+}
+
+.route-stop-kicker {
+  margin: 0 0 0.35rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.route-ready-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
 @media (min-width: 720px) {
   .route-builder-view > .route-builder-header,
   .route-builder-header.panel {
@@ -317,6 +372,10 @@
 
   .route-form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-flow-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
