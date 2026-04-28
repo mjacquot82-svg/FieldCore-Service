@@ -130,9 +130,43 @@ function ensureRouteVisitsForDate(targetDate) {
   return newVisits.length;
 }
 
+function getScheduledVisitsForProperty(propertyId) {
+  return state.visits
+    .filter((v) => v.property_id === propertyId && v.status === 'scheduled' && v.visit_date)
+    .sort((a, b) => a.visit_date.localeCompare(b.visit_date));
+}
+
+function getOverdueScheduledVisits() {
+  const currentDate = today();
+  return state.visits
+    .filter((v) => v.status === 'scheduled' && v.visit_date && v.visit_date < currentDate)
+    .sort((a, b) => a.visit_date.localeCompare(b.visit_date));
+}
+
+function renderVisitStatusLine(propertyId) {
+  const currentDate = today();
+  const scheduledVisits = getScheduledVisitsForProperty(propertyId);
+  const overdueVisit = scheduledVisits.find((v) => v.visit_date < currentDate);
+  if (overdueVisit) return `<p><span class="badge overdue">⚠ Overdue since ${overdueVisit.visit_date}</span></p>`;
+  const nextVisit = scheduledVisits.find((v) => v.visit_date >= currentDate);
+  if (nextVisit) return `<p><span class="badge paid-up">Next visit: ${nextVisit.visit_date}</span></p>`;
+  return '<p><span class="badge outstanding">Next visit: none scheduled</span></p>';
+}
+
+function renderOverdueVisitBanner(propertyMap, customerMap) {
+  const overdueVisits = getOverdueScheduledVisits();
+  if (!overdueVisits.length) return '';
+  const firstVisit = overdueVisits[0];
+  const property = propertyMap[firstVisit.property_id];
+  const customer = customerMap[property?.customer_id];
+  const plural = overdueVisits.length === 1 ? 'visit is' : 'visits are';
+  const example = property ? ` Oldest: ${customer?.name ?? 'Unknown customer'} · ${property.service_address} · ${firstVisit.visit_date}.` : '';
+  return `<div class="flash overdue-alert">⚠ ${overdueVisits.length} scheduled ${plural} overdue.${example}</div>`;
+}
+
 function renderPropertyQuickActionCards(properties, customerMap) {
   if (!properties.length) return '<article class="panel"><p>No service locations found for this customer.</p></article>';
-  return properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p><div class="actions"><button data-service-schedule="${p.property_id}">Schedule Visit</button><button data-service-pause="${p.property_id}">Pause Service</button><button data-service-frequency="${p.property_id}">Change Frequency</button><button data-service-price="${p.property_id}">Adjust Price</button></div></article>`).join('');
+  return properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p><div class="actions"><button data-service-schedule="${p.property_id}">Schedule Visit</button><button data-service-pause="${p.property_id}">Pause Service</button><button data-service-frequency="${p.property_id}">Change Frequency</button><button data-service-price="${p.property_id}">Adjust Price</button></div></article>`).join('');
 }
 
 function render() {
@@ -144,7 +178,7 @@ function render() {
   const propertyMap = getPropertyMap(state);
   const metrics = computeDashboard(state);
   const companyName = state.company?.name?.trim() || 'ServiceBatch';
-  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
+  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${renderOverdueVisitBanner(propertyMap, customerMap)}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
   bindEvents();
 }
 
@@ -189,7 +223,7 @@ function renderProperties(customerMap) {
   const customer = selectedCustomer();
   const properties = selectedCustomerId ? customerProperties(selectedCustomerId) : state.properties;
   const serviceForms = customer ? `<div class="service-layout"><form id="service-form" class="panel service-form"><h3>Add Recurring Service or Service Location</h3><label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label><label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label><label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label><label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label><button class="primary" type="submit">Add Service</button></form><form id="one-off-form" class="panel service-form"><h3>Schedule One-Off Job</h3>${properties.length ? `<label>Service Location<select name="property_id" required>${properties.map((p) => `<option value="${p.property_id}">${p.service_address}</option>`).join('')}</select></label>` : '<p>Add a service location before scheduling a one-off job.</p>'}<label>Job Date<input name="visit_date" type="date" required /></label><label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label><label>Price<input name="price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label><button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button></form></div>` : '';
-  return `<section><h2>${customer ? `${customer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p><p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${customer ? `<div class="actions"><button data-service-edit="${p.property_id}">Change Service</button><button data-service-remove="${p.property_id}">Remove Service</button></div>` : ''}</article>`).join('') : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
+  return `<section><h2>${customer ? `${customer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${customer ? `<div class="actions"><button data-service-edit="${p.property_id}">Change Service</button><button data-service-remove="${p.property_id}">Remove Service</button></div>` : ''}</article>`).join('') : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
 }
 
 function renderTodayRoute(customerMap, propertyMap) {
