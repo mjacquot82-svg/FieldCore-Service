@@ -18,16 +18,31 @@ function moveUtilityBannersToSidebar() {
   const dockItems = ensureSidebarDock();
   if (!dockItems) return;
 
-  document.querySelectorAll('main.content > .session-banner, main.content > .overdue-alert').forEach((banner) => {
+  const banners = document.querySelectorAll('main.content > .session-banner, main.content > .overdue-alert');
+  banners.forEach((banner) => {
+    if (banner.closest('[data-sidebar-dock]')) return;
     banner.classList.add('sidebar-dock-card');
     dockItems.appendChild(banner);
   });
 
-  const hasItems = dockItems.children.length > 0;
   const dock = dockItems.closest('[data-sidebar-dock]');
-  if (dock) dock.hidden = !hasItems;
+  if (dock) dock.hidden = dockItems.children.length === 0;
 }
 
-const observer = new MutationObserver(moveUtilityBannersToSidebar);
-observer.observe(document.querySelector('#app'), { childList: true, subtree: true });
-moveUtilityBannersToSidebar();
+function startSidebarNotificationDock() {
+  const app = document.querySelector('#app');
+  if (!app) return;
+
+  const observer = new MutationObserver(() => {
+    window.requestAnimationFrame(moveUtilityBannersToSidebar);
+  });
+
+  observer.observe(app, { childList: true, subtree: true });
+  moveUtilityBannersToSidebar();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startSidebarNotificationDock);
+} else {
+  startSidebarNotificationDock();
+}
