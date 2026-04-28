@@ -1,0 +1,63 @@
+/* FieldCore V1 compact density refinements */
+
+.customer-card .customer-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  margin: 0.45rem 0 0.5rem;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.customer-card .customer-overview div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.customer-card .customer-overview div:not(:last-child)::after {
+  content: '•';
+  margin-left: 0.45rem;
+  color: #94a3b8;
+}
+
+.customer-card .customer-overview span {
+  display: inline;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.customer-card .customer-overview strong {
+  display: inline;
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.customer-card .balance-badges .badge {
+  padding: 0.22rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.customer-card .actions button {
+  flex: 1 1 100px;
+}
+
+@media (min-width: 920px) {
+  section:has(.customer-card) > .stack {
+    grid-template-columns: repeat(2, minmax(360px, 1fr));
+    align-items: start;
+  }
+}
+
+@media (min-width: 1400px) {
+  section:has(.customer-card) > .stack {
+    grid-template-columns: repeat(3, minmax(340px, 1fr));
+  }
+}
