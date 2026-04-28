@@ -16,6 +16,7 @@ let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
 let selectedCustomerId = '';
 let selectedCustomerLetter = 'all';
+let showOverdueRoute = false;
 
 const navItems = [
   ['dashboard', 'Dashboard'],
@@ -161,7 +162,7 @@ function renderOverdueVisitBanner(propertyMap, customerMap) {
   const customer = customerMap[property?.customer_id];
   const plural = overdueVisits.length === 1 ? 'visit is' : 'visits are';
   const example = property ? ` Oldest: ${customer?.name ?? 'Unknown customer'} · ${property.service_address} · ${firstVisit.visit_date}.` : '';
-  return `<div class="flash overdue-alert">⚠ ${overdueVisits.length} scheduled ${plural} overdue.${example}</div>`;
+  return `<div class="flash overdue-alert">⚠ ${overdueVisits.length} scheduled ${plural} overdue.${example} <button class="primary" data-overdue-visits>View overdue visits</button></div>`;
 }
 
 function renderPropertyQuickActionCards(properties, customerMap) {
@@ -170,7 +171,7 @@ function renderPropertyQuickActionCards(properties, customerMap) {
 }
 
 function render() {
-  if (activeView === 'today-route') {
+  if (activeView === 'today-route' && !showOverdueRoute) {
     const createdCount = ensureRouteVisitsForDate(selectedRouteDate);
     if (createdCount > 0) saveState(state);
   }
@@ -227,8 +228,13 @@ function renderProperties(customerMap) {
 }
 
 function renderTodayRoute(customerMap, propertyMap) {
-  const routeVisits = state.visits.filter((v) => v.visit_date === selectedRouteDate);
-  return `<section><h2>Today’s Route / Daily Work List</h2><div class="panel"><label>Select Date<input type="date" id="route-date" value="${selectedRouteDate}" /></label></div><div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p><div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div></article>`; }).join('') : '<article class="panel"><p>No visits found for this date.</p></article>'}</div></section>`;
+  const routeVisits = showOverdueRoute ? getOverdueScheduledVisits() : state.visits.filter((v) => v.visit_date === selectedRouteDate);
+  const heading = showOverdueRoute ? 'Overdue Visits' : 'Today’s Route / Daily Work List';
+  const emptyText = showOverdueRoute ? 'No overdue visits found.' : 'No visits found for this date.';
+  const dateControl = showOverdueRoute
+    ? '<div class="panel"><p>Showing scheduled visits older than today.</p><button data-clear-overdue-route>Back to selected date</button></div>'
+    : `<div class="panel"><label>Select Date<input type="date" id="route-date" value="${selectedRouteDate}" /></label></div>`;
+  return `<section><h2>${heading}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Visit date ${v.visit_date}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p><div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div></article>`; }).join('') : `<article class="panel"><p>${emptyText}</p></article>`}</div></section>`;
 }
 
 function renderBatch() {
@@ -254,9 +260,11 @@ function metricCard(label, value) {
 }
 
 function bindEvents() {
-  app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.nav; selectedCustomerId = ''; flashMessage = ''; render(); }));
+  app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.nav; selectedCustomerId = ''; showOverdueRoute = false; flashMessage = ''; render(); }));
+  app.querySelectorAll('[data-overdue-visits]').forEach((button) => button.addEventListener('click', () => { activeView = 'today-route'; selectedCustomerId = ''; showOverdueRoute = true; flashMessage = 'Showing overdue visits.'; render(); }));
+  app.querySelectorAll('[data-clear-overdue-route]').forEach((button) => button.addEventListener('click', () => { showOverdueRoute = false; flashMessage = ''; render(); }));
   app.querySelectorAll('[data-letter-filter]').forEach((button) => button.addEventListener('click', () => { selectedCustomerLetter = button.dataset.letterFilter; render(); }));
-  app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => { const [view, customerId] = button.dataset.customerNav.split(':'); activeView = view; selectedCustomerId = customerId; flashMessage = ''; render(); }));
+  app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => { const [view, customerId] = button.dataset.customerNav.split(':'); activeView = view; selectedCustomerId = customerId; showOverdueRoute = false; flashMessage = ''; render(); }));
   const customerForm = app.querySelector('#customer-form');
   if (customerForm) customerForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(customerForm); const name = String(formData.get('name') || '').trim(); if (!name) return; state.customers = [...state.customers, { customer_id: makeId('cust'), company_id: state.company.company_id, name, phone: formData.get('phone') || '', email: formData.get('email') || '', billing_address: formData.get('billing_address') || '', status: 'active', created_at: new Date().toISOString() }]; selectedCustomerLetter = 'all'; saveState(state); flashMessage = 'Customer added.'; render(); });
   app.querySelectorAll('[data-customer-edit]').forEach((button) => button.addEventListener('click', () => { const customerId = button.dataset.customerEdit; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; const name = window.prompt('Customer name:', customer.name); if (!name) return; const phone = window.prompt('Phone:', customer.phone || ''); if (phone === null) return; const email = window.prompt('Email:', customer.email || ''); if (email === null) return; const billingAddress = window.prompt('Billing address:', customer.billing_address || ''); if (billingAddress === null) return; const status = window.prompt('Status (active or inactive):', customer.status || 'active'); if (!status) return; state.customers = state.customers.map((c) => c.customer_id === customerId ? { ...c, name, phone, email, billing_address: billingAddress, status } : c); saveState(state); flashMessage = 'Customer updated.'; render(); }));
@@ -272,13 +280,13 @@ function bindEvents() {
   app.querySelectorAll('[data-service-edit]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceEdit; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const serviceType = window.prompt('Service type:', property.service_type); if (!serviceType) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; const notes = window.prompt('Notes:', property.notes || ''); if (notes === null) return; const status = window.prompt('Status (active or inactive):', property.status || 'active'); if (!status) return; state.properties = state.properties.map((p) => p.property_id === propertyId ? { ...p, service_type: serviceType, recurring_frequency: frequency, default_price: Number(price || 0), notes, status } : p); saveState(state); flashMessage = 'Service updated.'; render(); }));
   app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; state.properties = state.properties.map((p) => p.property_id === propertyId ? { ...p, status: 'inactive' } : p); saveState(state); flashMessage = 'Service removed from active work.'; render(); }));
   const batchForm = app.querySelector('#batch-form');
-  if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateBatchInvoices(state, formData.get('start'), formData.get('end')); saveState(state); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; render(); });
+  if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateBatchInvoices(state, formData.get('start'), formData.get('end')); saveState(state); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
   app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(state, invoiceId, status); saveState(state); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
-  if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; render(); });
+  if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   app.querySelectorAll('[data-visit-action]').forEach((button) => button.addEventListener('click', () => { const [visitId, action] = button.dataset.visitAction.split(':'); if (action === 'complete') { state.visits = state.visits.map((v) => v.visit_id === visitId ? { ...v, status: 'completed' } : v); flashMessage = `Visit ${visitId} marked completed.`; } if (action === 'skip') { state.visits = state.visits.map((v) => v.visit_id === visitId ? { ...v, status: 'skipped' } : v); flashMessage = `Visit ${visitId} marked skipped.`; } if (action === 'skip-reschedule') { const sourceVisit = state.visits.find((v) => v.visit_id === visitId); if (!sourceVisit) return; const suggested = new Date(sourceVisit.visit_date); suggested.setDate(suggested.getDate() + 7); const nextDate = window.prompt('Reschedule visit to date (YYYY-MM-DD):', suggested.toISOString().slice(0, 10)); if (!nextDate) return; state.visits = state.visits.flatMap((v) => v.visit_id !== visitId ? [v] : [{ ...v, status: 'skipped' }, { ...v, visit_id: makeId('visit'), visit_date: nextDate, status: 'scheduled', created_at: new Date().toISOString() }]); flashMessage = `Visit ${visitId} skipped and rescheduled to ${nextDate}.`; } saveState(state); render(); }));
   const resetButton = app.querySelector('#reset-seed');
-  if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; flashMessage = 'Seed data restored.'; render(); });
+  if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
   app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
 }
 
