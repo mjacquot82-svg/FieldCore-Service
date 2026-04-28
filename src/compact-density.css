@@ -49,7 +49,7 @@
   flex: 1 1 100px;
 }
 
-/* Sidebar notification dock: summary signal only */
+/* Sidebar notification dock: general summary signal area */
 .sidebar .session-banner {
   display: flex;
   align-items: center;
@@ -70,7 +70,9 @@
   white-space: nowrap;
 }
 
-.sidebar .overdue-alert {
+.sidebar .overdue-alert,
+.sidebar .notification-alert,
+.sidebar .dock-alert {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -81,8 +83,10 @@
   font-size: 0;
 }
 
-.sidebar .overdue-alert::before {
-  content: '⚠ Overdue visits need attention';
+.sidebar .overdue-alert::before,
+.sidebar .notification-alert::before,
+.sidebar .dock-alert::before {
+  content: 'Action needed';
   min-width: 0;
   color: #1e40af;
   font-size: 0.82rem;
@@ -90,7 +94,11 @@
 }
 
 .sidebar .overdue-alert button,
-.sidebar .overdue-alert .primary {
+.sidebar .overdue-alert .primary,
+.sidebar .notification-alert button,
+.sidebar .notification-alert .primary,
+.sidebar .dock-alert button,
+.sidebar .dock-alert .primary {
   width: auto;
   min-width: 0;
   flex: 0 0 auto;
@@ -102,8 +110,12 @@
 }
 
 .sidebar .overdue-alert button::after,
-.sidebar .overdue-alert .primary::after {
-  content: 'View';
+.sidebar .overdue-alert .primary::after,
+.sidebar .notification-alert button::after,
+.sidebar .notification-alert .primary::after,
+.sidebar .dock-alert button::after,
+.sidebar .dock-alert .primary::after {
+  content: 'Review';
   font-size: 0.72rem;
 }
 
