@@ -92,21 +92,24 @@ function renderRouteStop(visit, index, customers, properties, firstOpenVisitId) 
       <p>Notes: ${visit.notes || 'None'}</p>
       <p>Status: ${visit.status}</p>
       <div class="actions">
-        <button data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
-        <button data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
-        <button data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
+        <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
+        <button type="button" data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
+        <button type="button" data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
       </div>
     </article>
   `;
 }
 
-function enhanceTodayRoute() {
-  const section = Array.from(document.querySelectorAll('main.content section')).find((candidate) => {
+function findRouteSection() {
+  return Array.from(document.querySelectorAll('main.content section')).find((candidate) => {
     const title = candidate.querySelector('h2')?.textContent?.trim();
     return title === 'Today’s Route / Daily Work List' || title === 'Overdue Visits';
   });
+}
 
-  if (!section || section.dataset.todayRouteFlow === 'true') return;
+function enhanceTodayRoute(force = false) {
+  const section = findRouteSection();
+  if (!section || (section.dataset.todayRouteFlow === 'true' && !force)) return;
 
   const state = loadState();
   if (!state) return;
@@ -119,7 +122,7 @@ function enhanceTodayRoute() {
   const visits = getRouteVisits(state, date, isOverdueView);
   const metrics = getRouteMetrics(visits, state);
   const firstOpenVisit = visits.find((visit) => visit.status === 'scheduled');
-  const dateControl = section.querySelector('.panel')?.outerHTML || '';
+  const dateControl = section.querySelector('#route-date')?.closest('.panel')?.outerHTML || '';
 
   section.dataset.todayRouteFlow = 'true';
   section.classList.add('today-route-flow');
@@ -152,24 +155,31 @@ function enhanceTodayRoute() {
       </div>
     </article>
   `;
+}
 
-  bindFlowVisitActions(section);
+function refreshTodayRouteFlow() {
+  const section = document.querySelector('main.content section.today-route-flow');
+  if (!section) return;
+  section.dataset.todayRouteFlow = 'false';
+  enhanceTodayRoute(true);
 }
 
 function updateVisitStatus(visitId, status) {
   const state = loadState();
   if (!state) return;
 
-  state.visits = (state.visits || []).map((visit) =>
-    visit.visit_id === visitId
-      ? { ...visit, status, completed_at: status === 'completed' ? new Date().toISOString() : visit.completed_at }
-      : visit
-  );
+  state.visits = (state.visits || []).map((visit) => {
+    if (visit.visit_id !== visitId) return visit;
+    return {
+      ...visit,
+      status,
+      completed_at: status === 'completed' ? new Date().toISOString() : visit.completed_at,
+      skipped_at: status === 'skipped' ? new Date().toISOString() : visit.skipped_at
+    };
+  });
 
   saveState(state);
-  const currentSection = document.querySelector('main.content section.today-route-flow');
-  if (currentSection) currentSection.dataset.todayRouteFlow = 'false';
-  scheduleEnhancement();
+  refreshTodayRouteFlow();
 }
 
 function skipAndRescheduleVisit(visitId) {
@@ -201,21 +211,22 @@ function skipAndRescheduleVisit(visitId) {
   ];
 
   saveState(state);
-  const currentSection = document.querySelector('main.content section.today-route-flow');
-  if (currentSection) currentSection.dataset.todayRouteFlow = 'false';
-  scheduleEnhancement();
+  refreshTodayRouteFlow();
 }
 
-function bindFlowVisitActions(section) {
-  section.querySelectorAll('[data-flow-visit-action]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const [visitId, action] = button.dataset.flowVisitAction.split(':');
-      if (!visitId || !action) return;
-      if (action === 'complete') updateVisitStatus(visitId, 'completed');
-      if (action === 'skip') updateVisitStatus(visitId, 'skipped');
-      if (action === 'skip-reschedule') skipAndRescheduleVisit(visitId);
-    });
-  });
+function handleFlowVisitClick(event) {
+  const button = event.target.closest('[data-flow-visit-action]');
+  if (!button) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const [visitId, action] = button.dataset.flowVisitAction.split(':');
+  if (!visitId || !action) return;
+
+  if (action === 'complete') updateVisitStatus(visitId, 'completed');
+  if (action === 'skip') updateVisitStatus(visitId, 'skipped');
+  if (action === 'skip-reschedule') skipAndRescheduleVisit(visitId);
 }
 
 let scheduled = false;
@@ -224,11 +235,11 @@ function scheduleEnhancement() {
   scheduled = true;
   window.requestAnimationFrame(() => {
     scheduled = false;
-    const currentSection = document.querySelector('main.content section.today-route-flow');
-    if (currentSection) delete currentSection.dataset.todayRouteFlow;
     enhanceTodayRoute();
   });
 }
+
+document.addEventListener('click', handleFlowVisitClick, true);
 
 const app = document.querySelector('#app');
 if (app) {
