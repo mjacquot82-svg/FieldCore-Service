@@ -49,6 +49,64 @@
   flex: 1 1 100px;
 }
 
+/* Sidebar notification dock: summary signal only */
+.sidebar .session-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem;
+  line-height: 1.15;
+}
+
+.sidebar .session-banner button,
+.sidebar .session-banner .primary {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 0.32rem 0.5rem;
+  border-radius: 0.45rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.sidebar .overdue-alert {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem;
+  line-height: 1.15;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.sidebar .overdue-alert::before {
+  content: '⚠ Overdue visits need attention';
+  min-width: 0;
+  color: #1e40af;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.sidebar .overdue-alert button,
+.sidebar .overdue-alert .primary {
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 0.32rem 0.55rem;
+  border-radius: 0.45rem;
+  font-size: 0;
+  white-space: nowrap;
+}
+
+.sidebar .overdue-alert button::after,
+.sidebar .overdue-alert .primary::after {
+  content: 'View';
+  font-size: 0.72rem;
+}
+
 @media (min-width: 920px) {
   section:has(.customer-card) > .stack {
     grid-template-columns: repeat(2, minmax(360px, 1fr));
