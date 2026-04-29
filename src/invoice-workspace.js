@@ -118,44 +118,88 @@ function renderServiceDetails(invoice, visits, propertyMap) {
   `;
 }
 
-function renderInvoiceCard(invoice, customerMap, propertyMap, state) {
+function renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId) {
+  const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
+  const balance = getBalance(invoice);
+  const visits = getInvoiceVisits(invoice, state);
+  const isSelected = invoice.invoice_id === selectedInvoiceId;
+
+  return `
+    <button type="button" class="invoice-list-card ${isSelected ? 'active' : ''}" data-select-invoice="${invoice.invoice_id}">
+      <div class="invoice-list-card-top">
+        <div>
+          <strong>${invoice.invoice_number}</strong>
+          <span>${customerName}</span>
+        </div>
+        <span class="badge ${getStatusClass(invoice)}">${invoice.payment_status || 'draft'}</span>
+      </div>
+      <div class="invoice-list-meta">
+        <span>Service: ${formatDateRange(visits, invoice)}</span>
+        <span>Due: ${invoice.due_date || 'n/a'}</span>
+      </div>
+      <div class="invoice-list-totals">
+        <span>Total ${currency(invoice.total)}</span>
+        <strong>Balance ${currency(balance)}</strong>
+      </div>
+    </button>
+  `;
+}
+
+function renderInvoicePreview(invoice, customerMap, propertyMap, state) {
+  if (!invoice) {
+    return `
+      <aside class="panel invoice-preview-panel">
+        <h3>Invoice Preview</h3>
+        <p>Select an invoice to review its services, totals, due date, and follow-up actions.</p>
+      </aside>
+    `;
+  }
+
   const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
   const balance = getBalance(invoice);
   const status = invoice.payment_status || 'draft';
   const visits = getInvoiceVisits(invoice, state);
+
   return `
-    <article class="panel invoice-card-v1 invoice-card-with-details" data-invoice-card="${invoice.invoice_id}">
-      <div class="invoice-summary-panel">
-        <div class="invoice-card-header">
-          <div>
-            <p class="eyebrow">Invoice</p>
-            <h3>${invoice.invoice_number}</h3>
-            <p>${customerName}</p>
-          </div>
-          <span class="badge ${getStatusClass(invoice)}">${status}</span>
+    <aside class="panel invoice-preview-panel" data-selected-invoice="${invoice.invoice_id}">
+      <div class="invoice-preview-header">
+        <div>
+          <p class="eyebrow">Selected Invoice</p>
+          <h3>${invoice.invoice_number}</h3>
+          <p>${customerName}</p>
         </div>
-        <div class="invoice-card-grid">
-          <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
-          <div><span>Paid</span><strong>${currency(invoice.amount_paid || 0)}</strong></div>
-          <div><span>Balance</span><strong>${currency(balance)}</strong></div>
-          <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
-        </div>
-        <p class="invoice-next-action">${invoiceActionText(invoice)}</p>
-        <div class="invoice-details" hidden>
-          <p><strong>Invoice date:</strong> ${invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a'}</p>
-          <p><strong>Customer:</strong> ${customerName}</p>
-          <p><strong>Status:</strong> ${status}</p>
-          <p><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
-        </div>
-        <div class="actions invoice-actions">
-          <button type="button" data-invoice-toggle>View details</button>
-          <button type="button" data-invoice-payment>Record payment</button>
-          <button type="button" data-invoice-print>Print / Save PDF</button>
-        </div>
+        <span class="badge ${getStatusClass(invoice)}">${status}</span>
       </div>
+
+      <div class="invoice-preview-total-card">
+        <span>Balance Due</span>
+        <strong>${currency(balance)}</strong>
+        <p>${invoiceActionText(invoice)}</p>
+      </div>
+
+      <div class="invoice-card-grid invoice-preview-grid">
+        <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
+        <div><span>Paid</span><strong>${currency(invoice.amount_paid || 0)}</strong></div>
+        <div><span>Invoice Date</span><strong>${invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a'}</strong></div>
+        <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
+      </div>
+
       ${renderServiceDetails(invoice, visits, propertyMap)}
-    </article>
+
+      <div class="actions invoice-actions invoice-preview-actions">
+        <button type="button" data-invoice-payment>Record payment</button>
+        <button type="button" data-invoice-print>Print / Save PDF</button>
+      </div>
+      <p class="invoice-next-action"><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
+    </aside>
   `;
+}
+
+function getSelectedInvoiceId(invoices) {
+  const existing = document.querySelector('[data-selected-invoice]')?.dataset.selectedInvoice;
+  if (existing && invoices.some((invoice) => invoice.invoice_id === existing)) return existing;
+  const firstOpen = invoices.find((invoice) => (invoice.payment_status || '') !== 'paid');
+  return firstOpen?.invoice_id || invoices[0]?.invoice_id || '';
 }
 
 function enhanceInvoicesView() {
@@ -173,6 +217,8 @@ function enhanceInvoicesView() {
   const openInvoices = invoices.filter((invoice) => (invoice.payment_status || '') !== 'paid');
   const overdueInvoices = openInvoices.filter((invoice) => getStatusClass(invoice) === 'overdue');
   const openBalance = openInvoices.reduce((sum, invoice) => sum + Math.max(0, getBalance(invoice)), 0);
+  const selectedInvoiceId = getSelectedInvoiceId(invoices);
+  const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
 
   section.dataset.invoiceWorkspace = 'true';
   section.classList.add('invoice-workspace');
@@ -189,30 +235,60 @@ function enhanceInvoicesView() {
       <article class="route-stat"><span>Overdue</span><strong>${overdueInvoices.length}</strong></article>
       <article class="route-stat"><span>Open balance</span><strong>${currency(openBalance)}</strong></article>
     </div>
-    <div class="stack invoice-card-stack">
-      ${invoices.length ? invoices.map((invoice) => renderInvoiceCard(invoice, customerMap, propertyMap, state)).join('') : '<article class="panel"><p>No invoices found yet.</p></article>'}
+    <div class="invoice-workspace-layout">
+      <div class="panel invoice-list-panel">
+        <div class="invoice-list-header">
+          <div>
+            <p class="eyebrow">Invoice list</p>
+            <h3>Billing Queue</h3>
+          </div>
+          <span>${openInvoices.length} open</span>
+        </div>
+        <div class="invoice-list-stack">
+          ${invoices.length ? invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId)).join('') : '<p>No invoices found yet.</p>'}
+        </div>
+      </div>
+      ${renderInvoicePreview(selectedInvoice, customerMap, propertyMap, state)}
     </div>
   `;
 
-  bindInvoiceWorkspace(section);
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state);
 }
 
-function bindInvoiceWorkspace(section) {
-  section.querySelectorAll('[data-invoice-toggle]').forEach((button) => {
+function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customerMap, propertyMap, state) {
+  const list = section.querySelector('.invoice-list-stack');
+  const preview = section.querySelector('.invoice-preview-panel');
+  const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
+
+  if (list) {
+    list.innerHTML = invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId)).join('');
+  }
+
+  if (preview) {
+    preview.outerHTML = renderInvoicePreview(selectedInvoice, customerMap, propertyMap, state);
+  }
+
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state);
+}
+
+function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state) {
+  section.querySelectorAll('[data-select-invoice]').forEach((button) => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
     button.addEventListener('click', () => {
-      const card = button.closest('[data-invoice-card]');
-      const details = card?.querySelector('.invoice-details');
-      if (!details) return;
-      details.hidden = !details.hidden;
-      button.textContent = details.hidden ? 'View details' : 'Hide details';
+      rerenderInvoiceWorkspace(section, button.dataset.selectInvoice, invoices, customerMap, propertyMap, state);
     });
   });
 
   section.querySelectorAll('[data-invoice-payment]').forEach((button) => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
     button.addEventListener('click', () => document.querySelector('[data-nav="payments"]')?.click());
   });
 
   section.querySelectorAll('[data-invoice-print]').forEach((button) => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
     button.addEventListener('click', () => window.print());
   });
 }
