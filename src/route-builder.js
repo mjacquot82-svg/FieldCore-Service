@@ -30,6 +30,50 @@ function propertyMap(state) {
   return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
 }
 
+function normalizePreferredDay(value) {
+  const day = String(value || '').trim();
+  if (day === 'Unassigned') return 'No preference';
+  if (routeDays.includes(day)) return day;
+  return 'No preference';
+}
+
+function customerPreferredDay(customer) {
+  return normalizePreferredDay(customer?.preferred_service_day || customer?.preferred_day);
+}
+
+function preferredDayMatchesRoute(customer, routeDay) {
+  return customerPreferredDay(customer) === routeDay;
+}
+
+function routeSuggestionRank(visit, customers, properties, routeDay, routedVisitIds) {
+  const property = properties[visit.property_id];
+  const customer = customers[property?.customer_id];
+  let score = 0;
+
+  if (preferredDayMatchesRoute(customer, routeDay)) score += 100;
+  if (routedVisitIds.has(visit.visit_id)) score -= 1000;
+  if (property?.recurring_frequency === 'weekly') score += 12;
+  if (property?.recurring_frequency === 'biweekly') score += 8;
+  if (property?.recurring_frequency === 'monthly') score += 4;
+  if (visit.notes || property?.notes) score += 1;
+
+  return score;
+}
+
+function sortVisitsForRouteSuggestions(visits, customers, properties, routeDay, routedVisitIds) {
+  return [...visits].sort((a, b) => {
+    const scoreDiff = routeSuggestionRank(b, customers, properties, routeDay, routedVisitIds) - routeSuggestionRank(a, customers, properties, routeDay, routedVisitIds);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const aProperty = properties[a.property_id];
+    const bProperty = properties[b.property_id];
+    const aCustomer = customers[aProperty?.customer_id];
+    const bCustomer = customers[bProperty?.customer_id];
+
+    return `${aCustomer?.name || ''} ${aProperty?.service_address || ''}`.localeCompare(`${bCustomer?.name || ''} ${bProperty?.service_address || ''}`);
+  });
+}
+
 function weekdayForDate(date) {
   const parsed = new Date(`${date}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return 'Monday';
@@ -58,11 +102,17 @@ function scheduledVisitsForDate(state, date) {
     .sort((a, b) => (a.service_description || '').localeCompare(b.service_description || ''));
 }
 
-function getRouteMetrics(visits, savedRoutes) {
+function getRouteMetrics(visits, savedRoutes, customers = {}, properties = {}, routeDay = '') {
   const routedVisitIds = new Set(savedRoutes.flatMap((route) => route.visit_ids || []));
   const unassignedStops = visits.filter((visit) => !routedVisitIds.has(visit.visit_id)).length;
   const totalValue = visits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
-  return { routedVisitIds, unassignedStops, totalValue };
+  const preferredDayStops = visits.filter((visit) => {
+    const property = properties[visit.property_id];
+    const customer = customers[property?.customer_id];
+    return preferredDayMatchesRoute(customer, routeDay);
+  }).length;
+
+  return { routedVisitIds, unassignedStops, totalValue, preferredDayStops };
 }
 
 function renderRouteStat(label, value) {
@@ -73,14 +123,16 @@ function renderRouteDaySelect(selectedDay) {
   return `<select name="route_day" required>${routeDays.map((day) => `<option value="${day}" ${day === selectedDay ? 'selected' : ''}>${day}</option>`).join('')}</select>`;
 }
 
-function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new Set()) {
+function renderVisitCheckbox(visit, customers, properties, routeDay, routedVisitIds = new Set()) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const isRouted = routedVisitIds.has(visit.visit_id);
   const city = (property?.service_address || '').split(',').slice(-2, -1)[0]?.trim();
+  const preferredDay = customerPreferredDay(customer);
+  const matchesPreferredDay = preferredDayMatchesRoute(customer, routeDay);
 
   return `
-    <label class="route-stop-card ${isRouted ? 'already-routed' : ''}">
+    <label class="route-stop-card ${isRouted ? 'already-routed' : ''} ${matchesPreferredDay ? 'preferred-day-match' : ''}">
       <input type="checkbox" name="visit_id" value="${visit.visit_id}" ${isRouted ? 'disabled' : ''} />
       <div class="route-stop-main">
         <div class="route-stop-title-row">
@@ -93,6 +145,8 @@ function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new 
           <span>${property?.service_type || 'Service'}</span>
           <span>${currency(visit.price)}</span>
           ${city ? `<span>${city}</span>` : ''}
+          <span>Preferred: ${preferredDay}</span>
+          ${matchesPreferredDay ? '<span class="badge paid-up">Preferred today</span>' : ''}
         </div>
         ${visit.notes ? `<small>${visit.notes}</small>` : ''}
       </div>
@@ -121,7 +175,9 @@ function renderSavedRoute(route, state) {
         ${routeVisits.map((visit) => {
           const property = properties[visit.property_id];
           const customer = customers[property?.customer_id];
-          return `<li><strong>${customer?.name || 'Unknown Customer'}</strong><span>${property?.service_address || 'Unknown address'} · ${visit.service_description}</span></li>`;
+          const preferredDay = customerPreferredDay(customer);
+          const preferredLabel = preferredDay === routeDay ? ' · preferred day match' : preferredDay !== 'No preference' ? ` · prefers ${preferredDay}` : '';
+          return `<li><strong>${customer?.name || 'Unknown Customer'}</strong><span>${property?.service_address || 'Unknown address'} · ${visit.service_description}${preferredLabel}</span></li>`;
         }).join('') || '<li>No stops found.</li>'}
       </ol>
     </article>
@@ -140,14 +196,15 @@ function renderRouteBuilder(date = today()) {
   const routeDay = weekdayForDate(date);
   const visits = scheduledVisitsForDate(state, date);
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
-  const metrics = getRouteMetrics(visits, savedRoutes);
+  const metrics = getRouteMetrics(visits, savedRoutes, customers, properties, routeDay);
+  const suggestedVisits = sortVisitsForRouteSuggestions(visits, customers, properties, routeDay, metrics.routedVisitIds);
 
   main.innerHTML = `
     <section class="route-builder-view">
       <div class="route-builder-header panel">
         <div>
           <h2>Route Builder</h2>
-          <p>Build weekday routes by worker. The date is a preview for scheduled stops only.</p>
+          <p>Build weekday routes by worker. Customers who prefer ${routeDay} are suggested first, but can still be scheduled any day.</p>
         </div>
         <label>Preview scheduled visits for
           <input type="date" id="route-builder-date" value="${date}" />
@@ -157,6 +214,7 @@ function renderRouteBuilder(date = today()) {
       <div class="route-stat-grid">
         ${renderRouteStat('Weekday route', routeDay)}
         ${renderRouteStat('Scheduled stops', visits.length)}
+        ${renderRouteStat('Preferred-day matches', metrics.preferredDayStops)}
         ${renderRouteStat('Unassigned stops', metrics.unassignedStops)}
         ${renderRouteStat('Saved routes', savedRoutes.length)}
         ${renderRouteStat('Route value', currency(metrics.totalValue))}
@@ -166,7 +224,7 @@ function renderRouteBuilder(date = today()) {
         <div class="route-form-header">
           <div>
             <h3>Create Weekday Route</h3>
-            <p>Choose the weekday, assign the worker, then select stops from the preview date.</p>
+            <p>Choose the weekday, assign the worker, then select suggested stops from the preview date.</p>
           </div>
           <button class="primary" type="submit" ${metrics.unassignedStops ? '' : 'disabled'}>Save Route</button>
         </div>
@@ -181,9 +239,10 @@ function renderRouteBuilder(date = today()) {
             <input name="route_name" placeholder="North Route, Franklin Route, Commercial Route" required />
           </label>
         </div>
-        <h4>Stops available for ${routeDay} preview (${date})</h4>
+        <h4>Suggested stops for ${routeDay} preview (${date})</h4>
+        <p>Preferred-day customers appear first. This is only a suggestion — the owner can still choose any open stop.</p>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
+          ${suggestedVisits.length ? suggestedVisits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeDay, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
       </form>
 
@@ -204,6 +263,15 @@ function bindRouteBuilderEvents() {
   const dateInput = document.querySelector('#route-builder-date');
   if (dateInput) {
     dateInput.addEventListener('change', () => renderRouteBuilder(dateInput.value));
+  }
+
+  const daySelect = document.querySelector('#route-builder-form [name="route_day"]');
+  if (daySelect) {
+    daySelect.addEventListener('change', () => {
+      const selectedDate = getRouteBuilderDate();
+      const selectedDay = daySelect.value;
+      document.querySelector('.route-builder-header p').textContent = `Build weekday routes by worker. Customers who prefer ${selectedDay} are suggested first, but can still be scheduled any day.`;
+    });
   }
 
   const form = document.querySelector('#route-builder-form');
