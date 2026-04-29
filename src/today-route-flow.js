@@ -29,6 +29,22 @@ function getSelectedRouteDate() {
   return document.querySelector('#route-date')?.value || new Date().toISOString().slice(0, 10);
 }
 
+function getWeekdayName(date) {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+function normalizePreferredDay(value) {
+  const day = String(value || '').trim();
+  if (!day || day === 'Unassigned') return 'No preference';
+  return day;
+}
+
+function getCustomerPreferredDay(customer) {
+  return normalizePreferredDay(customer?.preferred_service_day || customer?.preferred_day);
+}
+
 function visitIsInvoiced(visit, state) {
   return (state.invoices || []).some((invoice) =>
     Array.isArray(invoice.visit_ids) && invoice.visit_ids.includes(visit.visit_id)
@@ -99,9 +115,17 @@ function renderRouteStop(visit, index, customers, properties) {
   const customer = customers[property?.customer_id];
   const stateClass = stopStateClass(visit);
   const serviceText = visit.service_description || property?.service_type || 'Service';
+  const preferredDay = getCustomerPreferredDay(customer);
+  const routeDay = getWeekdayName(visit.visit_date || getSelectedRouteDate());
+  const preferredMatch = preferredDay !== 'No preference' && preferredDay === routeDay;
+  const preferredStatus = preferredMatch
+    ? '<span class="badge paid-up">matches today</span>'
+    : preferredDay !== 'No preference'
+      ? '<span class="badge outstanding">off-day visit</span>'
+      : '';
 
   return `
-    <article class="panel route-flow-stop ${stateClass}">
+    <article class="panel route-flow-stop ${stateClass} ${preferredDay !== 'No preference' && !preferredMatch ? 'off-day-preference' : ''}">
       <div class="route-stop-index">
         <p class="route-stop-kicker">Stop ${index + 1}</p>
         <span>${stopStateLabel(visit)}</span>
@@ -110,6 +134,7 @@ function renderRouteStop(visit, index, customers, properties) {
         <h3>${customer?.name || 'Unknown Customer'}</h3>
         <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
         <p class="route-stop-service">${serviceText}</p>
+        <p class="route-stop-preferred">Preferred: ${preferredDay} ${preferredStatus}</p>
       </div>
       <div class="actions route-stop-actions">
         <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
