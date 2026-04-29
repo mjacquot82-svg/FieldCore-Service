@@ -55,7 +55,9 @@ function getRouteMetrics(visits, state) {
   const remaining = visits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
   const readyToBillVisits = visits.filter((visit) => visit.status === 'completed' && !visitIsInvoiced(visit, state));
   const readyToBillValue = readyToBillVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
-  return { scheduled, completed, skipped, remaining, readyToBillVisits, readyToBillValue };
+  const unassigned = visits.filter((visit) => !visit.worker_name && !visit.assigned_worker && !visit.route_name).length;
+
+  return { scheduled, completed, skipped, remaining, readyToBillVisits, readyToBillValue, unassigned };
 }
 
 function getWorkerName(visit) {
@@ -73,6 +75,11 @@ function groupVisitsByWorker(visits) {
 
 function renderStat(label, value) {
   return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
+}
+
+function renderHealthIndicator(label, condition) {
+  if (!condition) return '';
+  return `<span class="badge outstanding">⚠ ${label}</span>`;
 }
 
 function stopStateClass(visit) {
@@ -160,6 +167,13 @@ function enhanceTodayRoute(force = false) {
   const routeGroups = groupVisitsByWorker(visits);
   const dateControl = section.querySelector('#route-date')?.closest('.panel')?.outerHTML || '';
 
+  const healthIndicators = `
+    <div class="route-health-indicators">
+      ${renderHealthIndicator(`${metrics.unassigned} unassigned stops`, metrics.unassigned > 0)}
+      ${renderHealthIndicator(`${metrics.skipped} skipped visits`, metrics.skipped > 0)}
+    </div>
+  `;
+
   section.dataset.todayRouteFlow = 'true';
   section.classList.add('today-route-flow');
   section.innerHTML = `
@@ -178,8 +192,10 @@ function enhanceTodayRoute(force = false) {
         ${renderStat('Visits Scheduled', visits.length)}
         ${renderStat('Completed', metrics.completed)}
         ${renderStat('Remaining', metrics.remaining)}
+        ${renderStat('Skipped', metrics.skipped)}
         ${renderStat('Ready to Bill', currency(metrics.readyToBillValue))}
       </div>
+      ${healthIndicators}
       <p><strong>Today’s Route is for daily operations.</strong> Ready-to-Bill is shown as a secondary shortcut for completed, uninvoiced visits.</p>
     </div>
     ${dateControl}
