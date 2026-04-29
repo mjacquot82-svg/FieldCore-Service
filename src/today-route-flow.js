@@ -119,14 +119,13 @@ function renderWorkerRoute(workerName, visits, customers, properties) {
     return aOrder.localeCompare(bOrder);
   });
   const completed = visits.filter((visit) => visit.status === 'completed').length;
-  const remaining = visits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
 
   return `
     <section class="panel worker-route-section">
       <div class="customer-card-header">
         <div>
           <h3>${workerName}</h3>
-          <p>${visits.length} visit${visits.length === 1 ? '' : 's'} · ${completed} completed · ${remaining} remaining</p>
+          <p>${completed} / ${visits.length} completed</p>
         </div>
       </div>
       <div class="stack route-flow-list">
