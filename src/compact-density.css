@@ -1,17 +1,12 @@
 /* FieldCore V1 compact density refinements */
 
 @media (min-width: 920px) {
-  .layout {
-    display: grid;
-    grid-template-columns: 250px minmax(0, 1fr);
-    align-items: start;
-  }
-
   .sidebar {
     position: sticky;
     top: 0;
-    height: 100vh;
+    max-height: 100vh;
     overflow-y: auto;
+    align-self: start;
   }
 
   .content {
