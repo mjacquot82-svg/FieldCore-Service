@@ -59,32 +59,61 @@ function formatDateRange(visits, invoice) {
   return first === last ? first : `${first} to ${last}`;
 }
 
-function renderServiceLine(visit, propertyMap) {
-  const property = propertyMap[visit.property_id];
-  const service = visit.service_description || property?.service_type || 'Service';
-  const address = property?.service_address || 'Unknown service location';
-  return `
-    <li class="invoice-service-line">
-      <span class="invoice-service-date">${visit.visit_date || 'No date'}</span>
-      <div>
+function groupVisitsByProperty(visits, propertyMap) {
+  return visits.reduce((groups, visit) => {
+    const property = propertyMap[visit.property_id];
+    const key = visit.property_id || 'unknown-location';
+    if (!groups[key]) {
+      groups[key] = {
+        address: property?.service_address || 'Unknown service location',
+        serviceType: property?.service_type || 'Service',
+        visits: [],
+        total: 0
+      };
+    }
+    groups[key].visits.push(visit);
+    groups[key].total += Number(visit.price || 0);
+    return groups;
+  }, {});
+}
+
+function renderGroupedServiceLines(visits) {
+  return visits.map((visit) => {
+    const service = visit.service_description || 'Service visit';
+    return `
+      <li class="invoice-service-line">
+        <span class="invoice-service-date">${visit.visit_date || 'No date'}</span>
         <strong>${service}</strong>
-        <p>${address}</p>
+        <span class="invoice-service-price">${currency(visit.price)}</span>
+      </li>
+    `;
+  }).join('');
+}
+
+function renderPropertyServiceGroup(group) {
+  return `
+    <article class="invoice-service-group">
+      <div class="invoice-service-group-header">
+        <div>
+          <strong>${group.address}</strong>
+          <p>${group.serviceType} · ${group.visits.length} visit${group.visits.length === 1 ? '' : 's'}</p>
+        </div>
+        <span>${currency(group.total)}</span>
       </div>
-      <span class="invoice-service-price">${currency(visit.price)}</span>
-    </li>
+      <ul class="invoice-service-list">
+        ${renderGroupedServiceLines(group.visits)}
+      </ul>
+    </article>
   `;
 }
 
 function renderServiceDetails(invoice, visits, propertyMap) {
+  const groups = Object.values(groupVisitsByProperty(visits, propertyMap));
   return `
     <aside class="invoice-services-panel">
       <p class="eyebrow">Services invoiced</p>
       <h4>${formatDateRange(visits, invoice)}</h4>
-      ${visits.length ? `
-        <ul class="invoice-service-list">
-          ${visits.map((visit) => renderServiceLine(visit, propertyMap)).join('')}
-        </ul>
-      ` : '<p>No linked visit details found for this invoice yet.</p>'}
+      ${groups.length ? groups.map(renderPropertyServiceGroup).join('') : '<p>No linked visit details found for this invoice yet.</p>'}
     </aside>
   `;
 }
