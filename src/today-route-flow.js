@@ -91,19 +91,20 @@ function renderRouteStop(visit, index, customers, properties) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const stateClass = stopStateClass(visit);
+  const serviceText = visit.service_description || property?.service_type || 'Service';
 
   return `
     <article class="panel route-flow-stop ${stateClass}">
-      <p class="route-stop-kicker">Stop ${index + 1} · ${stopStateLabel(visit)}</p>
-      <h3>${customer?.name || 'Unknown Customer'}</h3>
-      <p>${property?.service_address || 'Unknown address'}</p>
-      <p>${visit.service_description || property?.service_type || 'Service'}</p>
-      <p>${property?.service_type || 'Service'} · ${property?.recurring_frequency || 'n/a'}</p>
-      <p>Visit date ${visit.visit_date}</p>
-      <p>Price ${currency(visit.price)}</p>
-      <p>Notes: ${visit.notes || 'None'}</p>
-      <p>Status: ${visit.status}</p>
-      <div class="actions">
+      <div class="route-stop-index">
+        <p class="route-stop-kicker">Stop ${index + 1}</p>
+        <span>${stopStateLabel(visit)}</span>
+      </div>
+      <div class="route-stop-main-detail">
+        <h3>${customer?.name || 'Unknown Customer'}</h3>
+        <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
+        <p class="route-stop-service">${serviceText}</p>
+      </div>
+      <div class="actions route-stop-actions">
         <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
         <button type="button" data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
         <button type="button" data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
