@@ -135,7 +135,7 @@ function enhanceTodayRoute(force = false) {
       <div class="route-ready-value">${currency(metrics.readyToBillValue)}</div>
       <p><strong>Ready-to-bill value</strong> from completed, uninvoiced visits.</p>
       <div class="actions">
-        <button type="button" class="primary" data-flow-ready-to-bill ${metrics.readyToBillValue > 0 ? '' : 'disabled'}>Open Ready to Bill</button>
+        <button type="button" class="primary" data-flow-ready-to-bill>Open Ready to Bill</button>
       </div>
     </div>
     ${dateControl}
@@ -157,7 +157,7 @@ function enhanceTodayRoute(force = false) {
         ${renderStat('Ready to bill', currency(metrics.readyToBillValue))}
       </div>
       <div class="actions">
-        <button type="button" class="primary" data-flow-ready-to-bill ${metrics.readyToBillValue > 0 ? '' : 'disabled'}>Open Ready to Bill</button>
+        <button type="button" class="primary" data-flow-ready-to-bill>Open Ready to Bill</button>
       </div>
     </article>
   `;
@@ -229,7 +229,7 @@ function handleFlowClick(event) {
   if (readyButton) {
     event.preventDefault();
     event.stopPropagation();
-    if (!readyButton.hasAttribute('disabled')) goToReadyToBill();
+    goToReadyToBill();
     return;
   }
 
