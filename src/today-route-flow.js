@@ -52,37 +52,49 @@ function getRouteMetrics(visits, state) {
   const scheduled = visits.filter((visit) => visit.status === 'scheduled').length;
   const completed = visits.filter((visit) => visit.status === 'completed').length;
   const skipped = visits.filter((visit) => visit.status === 'skipped').length;
+  const remaining = visits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
   const readyToBillVisits = visits.filter((visit) => visit.status === 'completed' && !visitIsInvoiced(visit, state));
   const readyToBillValue = readyToBillVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
-  return { scheduled, completed, skipped, readyToBillVisits, readyToBillValue };
+  return { scheduled, completed, skipped, remaining, readyToBillVisits, readyToBillValue };
+}
+
+function getWorkerName(visit) {
+  return visit.worker_name || visit.assigned_worker || visit.crew_name || visit.route_name || 'Unassigned / Office Route';
+}
+
+function groupVisitsByWorker(visits) {
+  return visits.reduce((groups, visit) => {
+    const workerName = getWorkerName(visit);
+    if (!groups[workerName]) groups[workerName] = [];
+    groups[workerName].push(visit);
+    return groups;
+  }, {});
 }
 
 function renderStat(label, value) {
   return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
 }
 
-function stopStateClass(visit, firstOpenVisitId) {
+function stopStateClass(visit) {
   if (visit.status === 'completed') return 'completed';
   if (visit.status === 'skipped') return 'skipped';
-  if (visit.visit_id === firstOpenVisitId) return 'current';
   return 'upcoming';
 }
 
-function stopStateLabel(visit, firstOpenVisitId) {
+function stopStateLabel(visit) {
   if (visit.status === 'completed') return '✓ Completed';
   if (visit.status === 'skipped') return 'Skipped';
-  if (visit.visit_id === firstOpenVisitId) return '▶ Current stop';
-  return 'Upcoming';
+  return 'Scheduled';
 }
 
-function renderRouteStop(visit, index, customers, properties, firstOpenVisitId) {
+function renderRouteStop(visit, index, customers, properties) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
-  const stateClass = stopStateClass(visit, firstOpenVisitId);
+  const stateClass = stopStateClass(visit);
 
   return `
     <article class="panel route-flow-stop ${stateClass}">
-      <p class="route-stop-kicker">Stop ${index + 1} · ${stopStateLabel(visit, firstOpenVisitId)}</p>
+      <p class="route-stop-kicker">Stop ${index + 1} · ${stopStateLabel(visit)}</p>
       <h3>${customer?.name || 'Unknown Customer'}</h3>
       <p>${property?.service_address || 'Unknown address'}</p>
       <p>${visit.service_description || property?.service_type || 'Service'}</p>
@@ -97,6 +109,30 @@ function renderRouteStop(visit, index, customers, properties, firstOpenVisitId) 
         <button type="button" data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
       </div>
     </article>
+  `;
+}
+
+function renderWorkerRoute(workerName, visits, customers, properties) {
+  const sortedVisits = [...visits].sort((a, b) => {
+    const aOrder = String(a.route_order || a.stop_order || a.visit_time || a.start_time || a.visit_date || '');
+    const bOrder = String(b.route_order || b.stop_order || b.visit_time || b.start_time || b.visit_date || '');
+    return aOrder.localeCompare(bOrder);
+  });
+  const completed = visits.filter((visit) => visit.status === 'completed').length;
+  const remaining = visits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
+
+  return `
+    <section class="panel worker-route-section">
+      <div class="customer-card-header">
+        <div>
+          <h3>${workerName}</h3>
+          <p>${visits.length} visit${visits.length === 1 ? '' : 's'} · ${completed} completed · ${remaining} remaining</p>
+        </div>
+      </div>
+      <div class="stack route-flow-list">
+        ${sortedVisits.map((visit, index) => renderRouteStop(visit, index, customers, properties)).join('')}
+      </div>
+    </section>
   `;
 }
 
@@ -121,45 +157,35 @@ function enhanceTodayRoute(force = false) {
   const properties = propertyMap(state);
   const visits = getRouteVisits(state, date, isOverdueView);
   const metrics = getRouteMetrics(visits, state);
-  const firstOpenVisit = visits.find((visit) => visit.status === 'scheduled');
+  const routeGroups = groupVisitsByWorker(visits);
   const dateControl = section.querySelector('#route-date')?.closest('.panel')?.outerHTML || '';
 
   section.dataset.todayRouteFlow = 'true';
   section.classList.add('today-route-flow');
   section.innerHTML = `
     <div class="panel route-summary-header">
-      <div>
-        <h2>${title}</h2>
-        <p>${isOverdueView ? 'Scheduled visits older than today.' : `Execution view for ${date}.`}</p>
+      <div class="customer-card-header">
+        <div>
+          <h2>${isOverdueView ? 'Overdue Visits' : 'Today’s Route'}</h2>
+          <p>${isOverdueView ? 'Scheduled visits older than today.' : `Daily operations view for ${date}.`}</p>
+        </div>
+        <div class="actions">
+          <button type="button" data-flow-ready-to-bill>Open Ready to Bill</button>
+        </div>
       </div>
-      <div class="route-ready-value">${currency(metrics.readyToBillValue)}</div>
-      <p><strong>Ready-to-bill value</strong> from completed, uninvoiced visits.</p>
-      <div class="actions">
-        <button type="button" class="primary" data-flow-ready-to-bill>Open Ready to Bill</button>
+      <div class="route-flow-stats">
+        ${renderStat('Workers / Routes', Object.keys(routeGroups).length)}
+        ${renderStat('Visits Scheduled', visits.length)}
+        ${renderStat('Completed', metrics.completed)}
+        ${renderStat('Remaining', metrics.remaining)}
+        ${renderStat('Ready to Bill', currency(metrics.readyToBillValue))}
       </div>
+      <p><strong>Today’s Route is for daily operations.</strong> Ready-to-Bill is shown as a secondary shortcut for completed, uninvoiced visits.</p>
     </div>
     ${dateControl}
-    <div class="route-flow-stats">
-      ${renderStat('Stops shown', visits.length)}
-      ${renderStat('Scheduled', metrics.scheduled)}
-      ${renderStat('Completed', metrics.completed)}
-      ${renderStat('Skipped', metrics.skipped)}
+    <div class="stack worker-route-list">
+      ${visits.length ? Object.entries(routeGroups).map(([workerName, workerVisits]) => renderWorkerRoute(workerName, workerVisits, customers, properties)).join('') : '<article class="panel"><p>No visits found for this route view.</p></article>'}
     </div>
-    <div class="stack route-flow-list">
-      ${visits.length ? visits.map((visit, index) => renderRouteStop(visit, index, customers, properties, firstOpenVisit?.visit_id)).join('') : '<article class="panel"><p>No visits found for this route view.</p></article>'}
-    </div>
-    <article class="panel route-summary-footer">
-      <h3>Route Summary</h3>
-      <div class="route-flow-stats">
-        ${renderStat('Completed visits', metrics.completed)}
-        ${renderStat('Skipped visits', metrics.skipped)}
-        ${renderStat('Remaining visits', metrics.scheduled)}
-        ${renderStat('Ready to bill', currency(metrics.readyToBillValue))}
-      </div>
-      <div class="actions">
-        <button type="button" class="primary" data-flow-ready-to-bill>Open Ready to Bill</button>
-      </div>
-    </article>
   `;
 }
 
