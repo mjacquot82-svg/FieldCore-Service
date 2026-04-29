@@ -134,6 +134,9 @@ function enhanceTodayRoute(force = false) {
       </div>
       <div class="route-ready-value">${currency(metrics.readyToBillValue)}</div>
       <p><strong>Ready-to-bill value</strong> from completed, uninvoiced visits.</p>
+      <div class="actions">
+        <button type="button" class="primary" data-flow-ready-to-bill ${metrics.readyToBillValue > 0 ? '' : 'disabled'}>Open Ready to Bill</button>
+      </div>
     </div>
     ${dateControl}
     <div class="route-flow-stats">
@@ -152,6 +155,9 @@ function enhanceTodayRoute(force = false) {
         ${renderStat('Skipped visits', metrics.skipped)}
         ${renderStat('Remaining visits', metrics.scheduled)}
         ${renderStat('Ready to bill', currency(metrics.readyToBillValue))}
+      </div>
+      <div class="actions">
+        <button type="button" class="primary" data-flow-ready-to-bill ${metrics.readyToBillValue > 0 ? '' : 'disabled'}>Open Ready to Bill</button>
       </div>
     </article>
   `;
@@ -214,7 +220,19 @@ function skipAndRescheduleVisit(visitId) {
   refreshTodayRouteFlow();
 }
 
-function handleFlowVisitClick(event) {
+function goToReadyToBill() {
+  document.querySelector('[data-nav="batch"]')?.click();
+}
+
+function handleFlowClick(event) {
+  const readyButton = event.target.closest('[data-flow-ready-to-bill]');
+  if (readyButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!readyButton.hasAttribute('disabled')) goToReadyToBill();
+    return;
+  }
+
   const button = event.target.closest('[data-flow-visit-action]');
   if (!button) return;
 
@@ -239,7 +257,7 @@ function scheduleEnhancement() {
   });
 }
 
-document.addEventListener('click', handleFlowVisitClick, true);
+document.addEventListener('click', handleFlowClick, true);
 
 const app = document.querySelector('#app');
 if (app) {
