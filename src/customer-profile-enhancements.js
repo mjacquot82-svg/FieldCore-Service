@@ -82,59 +82,64 @@ function enhanceCustomerCards() {
   });
 }
 
+function openFullCustomerEditor(customerId) {
+  const state = loadState();
+  if (!state) return;
+
+  const customer = (state.customers || []).find((item) => item.customer_id === customerId);
+  if (!customer) return;
+
+  const name = window.prompt('Customer name:', customer.name || '');
+  if (name === null || !name.trim()) return;
+
+  const phone = window.prompt('Phone:', customer.phone || '');
+  if (phone === null) return;
+
+  const email = window.prompt('Email:', customer.email || '');
+  if (email === null) return;
+
+  const billingAddress = window.prompt('Billing address:', customer.billing_address || '');
+  if (billingAddress === null) return;
+
+  const preferredDay = window.prompt('Preferred service day (Unassigned, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday):', normalizeDay(customer.preferred_service_day || customer.preferred_day));
+  if (preferredDay === null) return;
+
+  const status = window.prompt('Status (active or inactive):', customer.status || 'active');
+  if (status === null || !status.trim()) return;
+
+  state.customers = state.customers.map((item) =>
+    item.customer_id === customerId
+      ? {
+          ...item,
+          name: name.trim(),
+          phone,
+          email,
+          billing_address: billingAddress,
+          preferred_service_day: normalizeDay(preferredDay),
+          status: status.trim()
+        }
+      : item
+  );
+
+  saveState(state);
+  window.dispatchEvent(new Event('storage'));
+  document.querySelector('[data-nav="customers"]')?.click();
+}
+
 function bindFullCustomerEdit() {
   document.querySelectorAll('[data-customer-edit]').forEach((button) => {
     if (button.dataset.fullEditBound === 'true') return;
-    button.dataset.fullEditBound = 'true';
 
-    button.addEventListener('click', (event) => {
+    const cleanButton = button.cloneNode(true);
+    cleanButton.dataset.fullEditBound = 'true';
+    cleanButton.textContent = 'Edit Customer';
+    button.replaceWith(cleanButton);
+
+    cleanButton.addEventListener('click', (event) => {
       event.preventDefault();
-      event.stopImmediatePropagation();
       event.stopPropagation();
-
-      const state = loadState();
-      if (!state) return;
-
-      const customerId = button.dataset.customerEdit;
-      const customer = (state.customers || []).find((item) => item.customer_id === customerId);
-      if (!customer) return;
-
-      const name = window.prompt('Customer name:', customer.name || '');
-      if (name === null || !name.trim()) return;
-
-      const phone = window.prompt('Phone:', customer.phone || '');
-      if (phone === null) return;
-
-      const email = window.prompt('Email:', customer.email || '');
-      if (email === null) return;
-
-      const billingAddress = window.prompt('Billing address:', customer.billing_address || '');
-      if (billingAddress === null) return;
-
-      const preferredDay = window.prompt('Preferred service day (Unassigned, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday):', normalizeDay(customer.preferred_service_day || customer.preferred_day));
-      if (preferredDay === null) return;
-
-      const status = window.prompt('Status (active or inactive):', customer.status || 'active');
-      if (status === null || !status.trim()) return;
-
-      state.customers = state.customers.map((item) =>
-        item.customer_id === customerId
-          ? {
-              ...item,
-              name: name.trim(),
-              phone,
-              email,
-              billing_address: billingAddress,
-              preferred_service_day: normalizeDay(preferredDay),
-              status: status.trim()
-            }
-          : item
-      );
-
-      saveState(state);
-      window.dispatchEvent(new Event('storage'));
-      document.querySelector('[data-nav="customers"]')?.click();
-    }, true);
+      openFullCustomerEditor(cleanButton.dataset.customerEdit);
+    });
   });
 }
 
