@@ -17,6 +17,10 @@ function getCustomerMap(state) {
   return Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
 }
 
+function getPropertyMap(state) {
+  return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
+}
+
 function getBalance(invoice) {
   return Number((Number(invoice.total || 0) - Number(invoice.amount_paid || 0)).toFixed(2));
 }
@@ -38,38 +42,118 @@ function invoiceActionText(invoice) {
   return 'Review invoice status.';
 }
 
-function renderInvoiceCard(invoice, customerMap) {
+function getInvoiceVisits(invoice, state) {
+  const visitIds = Array.isArray(invoice.visit_ids) ? invoice.visit_ids : [];
+  if (!visitIds.length) return [];
+  const idSet = new Set(visitIds);
+  return (state.visits || [])
+    .filter((visit) => idSet.has(visit.visit_id))
+    .sort((a, b) => String(a.visit_date || '').localeCompare(String(b.visit_date || '')));
+}
+
+function formatDateRange(visits, invoice) {
+  const dates = visits.map((visit) => visit.visit_date).filter(Boolean).sort();
+  if (!dates.length) return invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'No service dates found';
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  return first === last ? first : `${first} to ${last}`;
+}
+
+function groupVisitsByProperty(visits, propertyMap) {
+  return visits.reduce((groups, visit) => {
+    const property = propertyMap[visit.property_id];
+    const key = visit.property_id || 'unknown-location';
+    if (!groups[key]) {
+      groups[key] = {
+        address: property?.service_address || 'Unknown service location',
+        serviceType: property?.service_type || 'Service',
+        visits: [],
+        total: 0
+      };
+    }
+    groups[key].visits.push(visit);
+    groups[key].total += Number(visit.price || 0);
+    return groups;
+  }, {});
+}
+
+function renderGroupedServiceLines(visits) {
+  return visits.map((visit) => {
+    const service = visit.service_description || 'Service visit';
+    return `
+      <li class="invoice-service-line">
+        <span class="invoice-service-date">${visit.visit_date || 'No date'}</span>
+        <strong>${service}</strong>
+        <span class="invoice-service-price">${currency(visit.price)}</span>
+      </li>
+    `;
+  }).join('');
+}
+
+function renderPropertyServiceGroup(group) {
+  return `
+    <article class="invoice-service-group">
+      <div class="invoice-service-group-header">
+        <div>
+          <strong>${group.address}</strong>
+          <p>${group.serviceType} · ${group.visits.length} visit${group.visits.length === 1 ? '' : 's'}</p>
+        </div>
+        <span>${currency(group.total)}</span>
+      </div>
+      <ul class="invoice-service-list">
+        ${renderGroupedServiceLines(group.visits)}
+      </ul>
+    </article>
+  `;
+}
+
+function renderServiceDetails(invoice, visits, propertyMap) {
+  const groups = Object.values(groupVisitsByProperty(visits, propertyMap));
+  return `
+    <aside class="invoice-services-panel">
+      <p class="eyebrow">Services invoiced</p>
+      <h4>${formatDateRange(visits, invoice)}</h4>
+      ${groups.length ? groups.map(renderPropertyServiceGroup).join('') : '<p>No linked visit details found for this invoice yet.</p>'}
+    </aside>
+  `;
+}
+
+function renderInvoiceCard(invoice, customerMap, propertyMap, state) {
   const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
   const balance = getBalance(invoice);
   const status = invoice.payment_status || 'draft';
+  const visits = getInvoiceVisits(invoice, state);
   return `
-    <article class="panel invoice-card-v1" data-invoice-card="${invoice.invoice_id}">
-      <div class="invoice-card-header">
-        <div>
-          <p class="eyebrow">Invoice</p>
-          <h3>${invoice.invoice_number}</h3>
-          <p>${customerName}</p>
+    <article class="panel invoice-card-v1 invoice-card-with-details" data-invoice-card="${invoice.invoice_id}">
+      <div class="invoice-summary-panel">
+        <div class="invoice-card-header">
+          <div>
+            <p class="eyebrow">Invoice</p>
+            <h3>${invoice.invoice_number}</h3>
+            <p>${customerName}</p>
+          </div>
+          <span class="badge ${getStatusClass(invoice)}">${status}</span>
         </div>
-        <span class="badge ${getStatusClass(invoice)}">${status}</span>
+        <div class="invoice-card-grid">
+          <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
+          <div><span>Paid</span><strong>${currency(invoice.amount_paid || 0)}</strong></div>
+          <div><span>Balance</span><strong>${currency(balance)}</strong></div>
+          <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
+        </div>
+        <p class="invoice-next-action">${invoiceActionText(invoice)}</p>
+        <div class="invoice-details" hidden>
+          <p><strong>Invoice date:</strong> ${invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a'}</p>
+          <p><strong>Customer:</strong> ${customerName}</p>
+          <p><strong>Status:</strong> ${status}</p>
+          <p><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
+        </div>
+        <div class="actions invoice-actions">
+          <button type="button" data-invoice-toggle>View details</button>
+          <button type="button" data-invoice-payment>Record payment</button>
+          <button type="button" data-invoice-print>Print / Save PDF</button>
+        </div>
       </div>
-      <div class="invoice-card-grid">
-        <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
-        <div><span>Paid</span><strong>${currency(invoice.amount_paid || 0)}</strong></div>
-        <div><span>Balance</span><strong>${currency(balance)}</strong></div>
-        <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
-      </div>
-      <p class="invoice-next-action">${invoiceActionText(invoice)}</p>
-      <div class="invoice-details" hidden>
-        <p><strong>Invoice date:</strong> ${invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a'}</p>
-        <p><strong>Customer:</strong> ${customerName}</p>
-        <p><strong>Status:</strong> ${status}</p>
-        <p><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
-      </div>
-      <div class="actions invoice-actions">
-        <button type="button" data-invoice-toggle>View details</button>
-        <button type="button" data-invoice-payment>Record payment</button>
-        <button type="button" data-invoice-print>Print / Save PDF</button>
-      </div>
+      ${renderServiceDetails(invoice, visits, propertyMap)}
     </article>
   `;
 }
@@ -84,6 +168,7 @@ function enhanceInvoicesView() {
   if (!state) return;
 
   const customerMap = getCustomerMap(state);
+  const propertyMap = getPropertyMap(state);
   const invoices = [...(state.invoices || [])].sort((a, b) => String(b.due_date || '').localeCompare(String(a.due_date || '')));
   const openInvoices = invoices.filter((invoice) => (invoice.payment_status || '') !== 'paid');
   const overdueInvoices = openInvoices.filter((invoice) => getStatusClass(invoice) === 'overdue');
@@ -95,7 +180,7 @@ function enhanceInvoicesView() {
     <div class="page-header-v1">
       <div>
         <h2>Invoices</h2>
-        <p>Review invoice status, balances, due dates, and payment follow-up actions.</p>
+        <p>Review invoice status, balances, due dates, services invoiced, and payment follow-up actions.</p>
       </div>
     </div>
     <div class="invoice-summary-grid">
@@ -105,7 +190,7 @@ function enhanceInvoicesView() {
       <article class="route-stat"><span>Open balance</span><strong>${currency(openBalance)}</strong></article>
     </div>
     <div class="stack invoice-card-stack">
-      ${invoices.length ? invoices.map((invoice) => renderInvoiceCard(invoice, customerMap)).join('') : '<article class="panel"><p>No invoices found yet.</p></article>'}
+      ${invoices.length ? invoices.map((invoice) => renderInvoiceCard(invoice, customerMap, propertyMap, state)).join('') : '<article class="panel"><p>No invoices found yet.</p></article>'}
     </div>
   `;
 
