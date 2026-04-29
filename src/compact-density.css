@@ -1,14 +1,6 @@
 /* FieldCore V1 compact density refinements */
 
 @media (min-width: 920px) {
-  .sidebar {
-    position: sticky;
-    top: 0;
-    max-height: 100vh;
-    overflow-y: auto;
-    align-self: start;
-  }
-
   .content {
     max-width: 1180px;
     margin: 0 auto;
