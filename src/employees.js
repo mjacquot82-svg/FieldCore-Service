@@ -4,7 +4,18 @@ function makeEmployeeId() {
   return `emp_${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function syncEmployeeView(render) {
+  if (typeof render === 'function') {
+    render();
+    return;
+  }
 
+  const main = document.querySelector('main.content');
+  if (main) {
+    main.innerHTML = renderEmployees();
+    bindEmployeeEvents(render);
+  }
+}
 
 function employeeCard(employee) {
   return `
@@ -60,9 +71,12 @@ export function renderEmployees() {
 
 export function bindEmployeeEvents(render) {
   const form = document.querySelector('#employee-form');
-  if (form) {
+  if (form && form.dataset.employeeBound !== 'true') {
+    form.dataset.employeeBound = 'true';
     form.addEventListener('submit', (event) => {
       event.preventDefault();
+      if (form.dataset.employeeSubmitting === 'true') return;
+
       const state = loadState();
       if (!state) return;
 
@@ -76,6 +90,7 @@ export function bindEmployeeEvents(render) {
         return;
       }
 
+      form.dataset.employeeSubmitting = 'true';
       const employee = {
         employee_id: makeEmployeeId(),
         company_id: state.company?.company_id,
@@ -86,19 +101,23 @@ export function bindEmployeeEvents(render) {
         created_at: new Date().toISOString()
       };
 
-      state.employees = [...(state.employees || []), employee];
-      saveState(state);
-      if (typeof render === 'function') return render();
-      const main = document.querySelector('main.content');
-      if (main) {
-        main.innerHTML = renderEmployees();
-        bindEmployeeEvents(render);
+      const employees = state.employees || [];
+      if (employees.some((item) => item.employee_id === employee.employee_id)) {
+        form.dataset.employeeSubmitting = 'false';
+        return;
       }
-      return;
+
+      state.employees = [...employees, employee];
+      saveState(state);
+      loadState();
+      form.reset();
+      syncEmployeeView(render);
     });
   }
 
   document.querySelectorAll('[data-employee-toggle]').forEach((button) => {
+    if (button.dataset.employeeBound === 'true') return;
+    button.dataset.employeeBound = 'true';
     button.addEventListener('click', () => {
       const state = loadState();
       if (!state) return;
@@ -111,17 +130,14 @@ export function bindEmployeeEvents(render) {
       );
 
       saveState(state);
-      if (typeof render === 'function') return render();
-      const main = document.querySelector('main.content');
-      if (main) {
-        main.innerHTML = renderEmployees();
-        bindEmployeeEvents(render);
-      }
-      return;
+      loadState();
+      syncEmployeeView(render);
     });
   });
 
   document.querySelectorAll('[data-employee-pin]').forEach((button) => {
+    if (button.dataset.employeeBound === 'true') return;
+    button.dataset.employeeBound = 'true';
     button.addEventListener('click', () => {
       const state = loadState();
       if (!state) return;
@@ -139,14 +155,8 @@ export function bindEmployeeEvents(render) {
       );
 
       saveState(state);
-      if (typeof render === 'function') return render();
-      const main = document.querySelector('main.content');
-      if (main) {
-        main.innerHTML = renderEmployees();
-        bindEmployeeEvents(render);
-      }
-      return;
+      loadState();
+      syncEmployeeView(render);
     });
   });
 }
-

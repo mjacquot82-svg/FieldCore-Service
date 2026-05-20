@@ -378,6 +378,11 @@ function metricCard(label, value) {
   return `<article class="card"><p>${label}</p><strong>${value}</strong></article>`;
 }
 
+function reloadStateAndRender() {
+  state = loadState();
+  render();
+}
+
 function bindEvents() {
   app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.nav; selectedCustomerId = ''; showOverdueRoute = false; flashMessage = ''; render(); }));
   app.querySelectorAll('[data-overdue-visits]').forEach((button) => button.addEventListener('click', () => { activeView = 'today-route'; selectedCustomerId = ''; showOverdueRoute = true; flashMessage = 'Showing overdue visits.'; render(); }));
@@ -407,7 +412,7 @@ function bindEvents() {
     bindRouteBuilderEvents(state, saveState, (date) => { selectedRouteBuilderDate = date; }, render);
   }
   if (activeView === 'employees') {
-    bindEmployeeEvents(render);
+    bindEmployeeEvents(reloadStateAndRender);
   }
   app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', () => {
     const [visitId, action] = button.dataset.workerAction.split(':');
