@@ -30,6 +30,7 @@ function employeeCard(employee) {
       <div class="actions">
         <button data-employee-toggle="${employee.employee_id}">${employee.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>
         <button data-employee-pin="${employee.employee_id}">Change PIN</button>
+        <button data-employee-delete="${employee.employee_id}">Delete</button>
       </div>
     </article>
   `;
@@ -154,6 +155,29 @@ export function bindEmployeeEvents(render) {
         employee.employee_id === employeeId ? { ...employee, pin: nextPin.trim() } : employee
       );
 
+      saveState(state);
+      loadState();
+      syncEmployeeView(render);
+    });
+  });
+
+  document.querySelectorAll('[data-employee-delete]').forEach((button) => {
+    if (button.dataset.employeeBound === 'true') return;
+    button.dataset.employeeBound = 'true';
+    button.addEventListener('click', () => {
+      const state = loadState();
+      if (!state) return;
+
+      const employeeId = button.dataset.employeeDelete;
+      const employee = (state.employees || []).find((item) => item.employee_id === employeeId);
+      if (!employee) {
+        syncEmployeeView(render);
+        return;
+      }
+
+      if (!window.confirm(`Permanently delete ${employee.name}?`)) return;
+
+      state.employees = (state.employees || []).filter((item) => item.employee_id !== employeeId);
       saveState(state);
       loadState();
       syncEmployeeView(render);
