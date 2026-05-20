@@ -1,5 +1,4 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-const ROUTE_BUILDER_ID = 'route-builder';
+import { getCustomerMap, getPropertyMap } from './lib/store.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -10,46 +9,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 const makeRouteId = () => `route_${crypto.randomUUID().slice(0, 8)}`;
 const routeDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function customerMap(state) {
-  return Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
-}
-
-function propertyMap(state) {
-  return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
-}
-
 function weekdayForDate(date) {
   const parsed = new Date(`${date}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return 'Monday';
   return parsed.toLocaleDateString('en-US', { weekday: 'long' });
-}
-
-function addRouteBuilderNav() {
-  document.querySelectorAll('nav').forEach((nav) => {
-    if (nav.querySelector(`[data-enhanced-nav="${ROUTE_BUILDER_ID}"]`)) return;
-
-    const button = document.createElement('button');
-    button.className = 'nav-btn';
-    button.dataset.enhancedNav = ROUTE_BUILDER_ID;
-    button.textContent = 'Route Builder';
-    nav.appendChild(button);
-  });
-}
-
-function getRouteBuilderDate() {
-  return document.querySelector('#route-builder-date')?.value || today();
 }
 
 function scheduledVisitsForDate(state, date) {
@@ -101,8 +64,8 @@ function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new 
 }
 
 function renderSavedRoute(route, state) {
-  const customers = customerMap(state);
-  const properties = propertyMap(state);
+  const customers = getCustomerMap(state);
+  const properties = getPropertyMap(state);
   const visitsById = new Map((state.visits || []).map((visit) => [visit.visit_id, visit]));
   const routeVisits = (route.visit_ids || []).map((visitId) => visitsById.get(visitId)).filter(Boolean);
   const routeTotal = routeVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
@@ -128,21 +91,15 @@ function renderSavedRoute(route, state) {
   `;
 }
 
-function renderRouteBuilder(date = today()) {
-  const state = loadState();
-  if (!state) return;
-
-  const main = document.querySelector('main.content');
-  if (!main) return;
-
-  const customers = customerMap(state);
-  const properties = propertyMap(state);
+export function renderRouteBuilder(state, date = today()) {
+  const customers = getCustomerMap(state);
+  const properties = getPropertyMap(state);
   const routeDay = weekdayForDate(date);
   const visits = scheduledVisitsForDate(state, date);
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
   const metrics = getRouteMetrics(visits, savedRoutes);
 
-  main.innerHTML = `
+  return `
     <section class="route-builder-view">
       <div class="route-builder-header panel">
         <div>
@@ -196,14 +153,15 @@ function renderRouteBuilder(date = today()) {
       </div>
     </section>
   `;
-
-  bindRouteBuilderEvents();
 }
 
-function bindRouteBuilderEvents() {
+export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, render) {
   const dateInput = document.querySelector('#route-builder-date');
   if (dateInput) {
-    dateInput.addEventListener('change', () => renderRouteBuilder(dateInput.value));
+    dateInput.addEventListener('change', () => {
+      setRouteBuilderDate(dateInput.value);
+      render();
+    });
   }
 
   const form = document.querySelector('#route-builder-form');
@@ -212,15 +170,12 @@ function bindRouteBuilderEvents() {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
 
-    const state = loadState();
-    if (!state) return;
-
     const formData = new FormData(form);
     const selectedVisitIds = formData.getAll('visit_id');
-    const routeDay = String(formData.get('route_day') || weekdayForDate(getRouteBuilderDate())).trim();
+    const routeDay = String(formData.get('route_day') || weekdayForDate(dateInput?.value || today())).trim();
     const routeName = String(formData.get('route_name') || '').trim();
     const assignedWorker = String(formData.get('assigned_worker') || '').trim();
-    const routeDate = getRouteBuilderDate();
+    const routeDate = dateInput?.value || today();
 
     if (!routeName || selectedVisitIds.length === 0) return;
 
@@ -242,26 +197,7 @@ function bindRouteBuilderEvents() {
         : visit
     );
 
-    saveState(state);
-    renderRouteBuilder(routeDate);
+    saveStateFn(state);
+    render();
   });
 }
-
-function setActiveRouteBuilderButton() {
-  document.querySelectorAll('.nav-btn').forEach((button) => button.classList.remove('active'));
-  document.querySelectorAll(`[data-enhanced-nav="${ROUTE_BUILDER_ID}"]`).forEach((button) => button.classList.add('active'));
-}
-
-document.addEventListener('click', (event) => {
-  const routeBuilderButton = event.target.closest(`[data-enhanced-nav="${ROUTE_BUILDER_ID}"]`);
-  if (!routeBuilderButton) return;
-
-  event.preventDefault();
-  setActiveRouteBuilderButton();
-  renderRouteBuilder();
-});
-
-const observer = new MutationObserver(addRouteBuilderNav);
-observer.observe(document.querySelector('#app'), { childList: true, subtree: true });
-
-addRouteBuilderNav();

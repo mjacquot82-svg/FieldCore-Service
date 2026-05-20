@@ -8,25 +8,38 @@ import {
   saveState,
   updateInvoicePaymentStatus
 } from './lib/store.js';
+import { getSession, clearSession, renderLogin } from './role-pin-login.js';
+import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
 
 const app = document.querySelector('#app');
 let state = loadState();
-let activeView = 'dashboard';
+let currentSession = getSession();
+let activeView = currentSession?.role === 'employee' ? 'worker-route' : 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
+let selectedRouteBuilderDate = new Date().toISOString().slice(0, 10);
 let selectedCustomerId = '';
 let selectedCustomerLetter = 'all';
 let showOverdueRoute = false;
 
-const navItems = [
+const ALL_NAV_ITEMS = [
   ['dashboard', 'Dashboard'],
   ['today-route', 'Today’s Route'],
+  ['route-builder', 'Route Builder'],
   ['customers', 'Customers'],
   ['batch', 'Ready to Bill'],
   ['invoices', 'Invoices'],
   ['payments', 'Payments'],
   ['settings', 'Settings']
 ];
+
+function getNavItems(session) {
+  if (session?.role === 'employee') {
+    return [['worker-route', 'My Route']];
+  }
+  return ALL_NAV_ITEMS;
+}
+
 
 const currency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
 const makeId = (prefix) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
@@ -171,20 +184,39 @@ function renderPropertyQuickActionCards(properties, customerMap) {
 }
 
 function render() {
+  currentSession = getSession();
+  if (!currentSession) {
+    renderLogin();
+    return;
+  }
+
+  if (currentSession.role === 'employee') {
+    activeView = 'worker-route';
+  } else if (activeView === 'worker-route') {
+    activeView = 'dashboard';
+  }
+
   if (activeView === 'today-route' && !showOverdueRoute) {
     const createdCount = ensureRouteVisitsForDate(selectedRouteDate);
     if (createdCount > 0) saveState(state);
   }
+
   const customerMap = getCustomerMap(state);
   const propertyMap = getPropertyMap(state);
   const metrics = computeDashboard(state);
   const companyName = state.company?.name?.trim() || 'ServiceBatch';
-  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${renderOverdueVisitBanner(propertyMap, customerMap)}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
+  const navItems = getNavItems(currentSession);
+  const sessionBanner = renderSessionBanner(currentSession);
+  const overdueBanner = currentSession.role === 'employee' ? '' : renderOverdueVisitBanner(propertyMap, customerMap);
+
+  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${sessionBanner}${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${overdueBanner}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
   bindEvents();
 }
 
 function renderView(view, metrics, customerMap, propertyMap) {
   if (view === 'dashboard') return renderDashboard(metrics);
+  if (view === 'worker-route') return renderWorkerRoute(currentSession);
+  if (view === 'route-builder') return renderRouteBuilder(state, selectedRouteBuilderDate);
   if (view === 'customers') return renderCustomers();
   if (view === 'timeline') return renderTimeline(customerMap, propertyMap);
   if (view === 'properties') return renderProperties(customerMap);
@@ -237,6 +269,90 @@ function renderTodayRoute(customerMap, propertyMap) {
   return `<section><h2>${heading}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Visit date ${v.visit_date}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p><div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div></article>`; }).join('') : `<article class="panel"><p>${emptyText}</p></article>`}</div></section>`;
 }
 
+function renderSessionBanner(session) {
+  return `
+    <div class="flash session-banner">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+        <div><strong>${session.name}</strong> <span style="color:#475569;font-size:0.95rem;">(${session.role})</span></div>
+        <button data-logout class="primary">Logout</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderWorkerStop(visit, customers, properties, index) {
+  const property = properties[visit.property_id];
+  const customer = customers[property?.customer_id];
+  const serviceText = visit.service_description || property?.service_type || 'Service';
+  const statusLabel = visit.status === 'in-progress' ? 'In progress' : visit.status === 'completed' ? 'Completed' : visit.status === 'skipped' ? 'Skipped' : 'Scheduled';
+  const statusClass = visit.status === 'completed' ? 'completed' : visit.status === 'skipped' ? 'skipped' : visit.status === 'in-progress' ? 'current' : '';
+  const actions = [];
+
+  if (visit.status === 'scheduled') {
+    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:start">Start Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
+  } else if (visit.status === 'in-progress') {
+    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
+  }
+
+  return `
+    <article class="panel route-flow-stop ${statusClass}">
+      <div class="route-stop-index">
+        <p class="route-stop-kicker">Stop ${index + 1}</p>
+        <span>${statusLabel}</span>
+      </div>
+      <div class="route-stop-main-detail">
+        <h3>${customer?.name || 'Unknown Customer'}</h3>
+        <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
+        <p class="route-stop-service">${serviceText}</p>
+        <p>${property?.service_type || 'Service'} · ${property?.recurring_frequency || 'n/a'}</p>
+        <p>${visit.notes || 'No notes provided.'}</p>
+      </div>
+      <div class="actions route-stop-actions">
+        ${actions.join('')}
+      </div>
+    </article>
+  `;
+}
+
+function renderWorkerRoute(session) {
+  if (!session) return '<section><p>Worker session required.</p></section>';
+  const todayDate = today();
+  const customers = getCustomerMap(state);
+  const properties = getPropertyMap(state);
+  const assignedVisits = state.visits.filter((visit) => visit.visit_date === todayDate && visit.assigned_worker === session.name);
+  const completed = assignedVisits.filter((visit) => visit.status === 'completed').length;
+  const remaining = assignedVisits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
+
+  return `
+    <section>
+      <h2>My Route</h2>
+      <p class="section-description">Assigned stops for ${todayDate}</p>
+      <div class="route-stat-grid">
+        ${metricCard('Total stops', assignedVisits.length)}
+        ${metricCard('Completed', completed)}
+        ${metricCard('Remaining', remaining)}
+      </div>
+      <div class="stack route-flow-list">
+        ${assignedVisits.length ? assignedVisits.map((visit, index) => renderWorkerStop(visit, customers, properties, index)).join('') : '<article class="panel"><p>No assigned stops for today.</p></article>'}
+      </div>
+    </section>
+  `;
+}
+
+function updateWorkerVisitStatus(visitId, action) {
+  state.visits = state.visits.map((visit) => {
+    if (visit.visit_id !== visitId) return visit;
+    if (action === 'start') return { ...visit, status: 'in-progress', started_at: new Date().toISOString() };
+    if (action === 'complete') return { ...visit, status: 'completed', completed_at: new Date().toISOString() };
+    if (action === 'skip') return { ...visit, status: 'skipped', skipped_at: new Date().toISOString() };
+    return visit;
+  });
+  saveState(state);
+}
+
 function renderBatch() {
   return `<section><h2>Ready to Bill</h2><p>Select a date range to invoice completed, unbilled visits and group by customer.</p><form id="batch-form" class="panel"><label>Start Date<input type="date" name="start" value="2026-04-01" required/></label><label>End Date<input type="date" name="end" value="2026-04-30" required/></label><button class="primary" type="submit">Generate Batch Invoices</button></form></section>`;
 }
@@ -284,9 +400,21 @@ function bindEvents() {
   app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(state, invoiceId, status); saveState(state); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
-  app.querySelectorAll('[data-visit-action]').forEach((button) => button.addEventListener('click', () => { const [visitId, action] = button.dataset.visitAction.split(':'); if (action === 'complete') { state.visits = state.visits.map((v) => v.visit_id === visitId ? { ...v, status: 'completed' } : v); flashMessage = `Visit ${visitId} marked completed.`; } if (action === 'skip') { state.visits = state.visits.map((v) => v.visit_id === visitId ? { ...v, status: 'skipped' } : v); flashMessage = `Visit ${visitId} marked skipped.`; } if (action === 'skip-reschedule') { const sourceVisit = state.visits.find((v) => v.visit_id === visitId); if (!sourceVisit) return; const suggested = new Date(sourceVisit.visit_date); suggested.setDate(suggested.getDate() + 7); const nextDate = window.prompt('Reschedule visit to date (YYYY-MM-DD):', suggested.toISOString().slice(0, 10)); if (!nextDate) return; state.visits = state.visits.flatMap((v) => v.visit_id !== visitId ? [v] : [{ ...v, status: 'skipped' }, { ...v, visit_id: makeId('visit'), visit_date: nextDate, status: 'scheduled', created_at: new Date().toISOString() }]); flashMessage = `Visit ${visitId} skipped and rescheduled to ${nextDate}.`; } saveState(state); render(); }));
+  if (activeView === 'route-builder') {
+    bindRouteBuilderEvents(state, saveState, (date) => { selectedRouteBuilderDate = date; }, render);
+  }
+  app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', () => {
+    const [visitId, action] = button.dataset.workerAction.split(':');
+    updateWorkerVisitStatus(visitId, action);
+    if (action === 'start') flashMessage = 'Stop started.';
+    if (action === 'complete') flashMessage = 'Stop completed.';
+    if (action === 'skip') flashMessage = 'Stop skipped.';
+    render();
+  }));
+  const logoutButton = app.querySelector('[data-logout]');
+  if (logoutButton) logoutButton.addEventListener('click', () => { clearSession(); currentSession = null; activeView = 'dashboard'; flashMessage = ''; render(); });
   const resetButton = app.querySelector('#reset-seed');
-  if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
+  if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; selectedRouteBuilderDate = today(); showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
   app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
 }
 

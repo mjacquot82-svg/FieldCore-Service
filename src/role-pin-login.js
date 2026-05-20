@@ -14,7 +14,7 @@ function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function getSession() {
+export function getSession() {
   try {
     return JSON.parse(sessionStorage.getItem(SESSION_KEY));
   } catch {
@@ -22,26 +22,26 @@ function getSession() {
   }
 }
 
-function setSession(session) {
+export function setSession(session) {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
-function clearSession() {
+export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-function getAdminPin(state) {
+export function getAdminPin(state) {
   return state?.settings?.admin_pin || DEFAULT_ADMIN_PIN;
 }
 
-function ensureDefaultAdminPin(state) {
+export function ensureDefaultAdminPin(state) {
   if (!state) return;
   if (state.settings?.admin_pin) return;
   state.settings = { ...(state.settings || {}), admin_pin: DEFAULT_ADMIN_PIN };
   saveState(state);
 }
 
-function activeEmployees(state) {
+export function activeEmployees(state) {
   return (state?.employees || []).filter((employee) => employee.status === 'active');
 }
 
@@ -83,14 +83,14 @@ function loginCard() {
   `;
 }
 
-function renderLogin() {
+export function renderLogin() {
   const app = document.querySelector('#app');
   if (!app) return;
   app.innerHTML = loginCard();
   bindLoginEvents();
 }
 
-function bindLoginEvents() {
+export function bindLoginEvents() {
   const adminForm = document.querySelector('#admin-login-form');
   if (adminForm) {
     adminForm.addEventListener('submit', (event) => {
@@ -133,92 +133,4 @@ function bindLoginEvents() {
       window.location.reload();
     });
   }
-}
-
-function addLogoutControl(session) {
-  const main = document.querySelector('main.content');
-  if (!main) return;
-
-  const existingBanners = [...document.querySelectorAll('[data-session-banner]')];
-  const existing = existingBanners[0];
-  existingBanners.slice(1).forEach((banner) => banner.remove());
-
-  if (existing) {
-    const button = existing.querySelector('[data-logout]');
-    if (button && button.dataset.boundLogout !== 'true') {
-      button.dataset.boundLogout = 'true';
-      button.addEventListener('click', () => {
-        clearSession();
-        window.location.reload();
-      });
-    }
-    return;
-  }
-
-  const banner = document.createElement('div');
-  banner.className = 'flash session-banner';
-  banner.setAttribute('data-session-banner', 'true');
-  banner.innerHTML = `<strong>${session.name}</strong><span>(${session.role})</span><button data-logout class="primary">Logout</button>`;
-  main.prepend(banner);
-
-  const button = banner.querySelector('[data-logout]');
-  if (button) {
-    button.dataset.boundLogout = 'true';
-    button.addEventListener('click', () => {
-      clearSession();
-      window.location.reload();
-    });
-  }
-}
-
-function restrictEmployeeNav() {
-  const allowedLabels = new Set(['Today’s Route']);
-  document.querySelectorAll('.nav-btn').forEach((button) => {
-    const label = button.textContent.trim();
-    const isAllowed = allowedLabels.has(label);
-    button.hidden = !isAllowed;
-  });
-}
-
-function openEmployeeRoute(session) {
-  const routeButton = [...document.querySelectorAll('.nav-btn')]
-    .find((button) => button.textContent.trim() === 'Today’s Route');
-
-  const heading = document.querySelector('section h2')?.textContent.trim();
-  if (routeButton && heading !== 'Today’s Route / Daily Work List' && heading !== 'Overdue Visits') {
-    routeButton.click();
-  }
-
-  setTimeout(() => {
-    const workerFilter = document.querySelector('#worker-route-filter');
-    if (workerFilter) {
-      workerFilter.value = session.name;
-      workerFilter.dispatchEvent(new Event('change', { bubbles: true }));
-      workerFilter.closest('label')?.setAttribute('hidden', 'true');
-    }
-  }, 50);
-}
-
-function applySessionRules() {
-  const session = getSession();
-  if (!session) {
-    renderLogin();
-    return;
-  }
-
-  addLogoutControl(session);
-
-  if (session.role === 'employee') {
-    restrictEmployeeNav();
-    openEmployeeRoute(session);
-  }
-}
-
-const session = getSession();
-if (!session) {
-  document.addEventListener('DOMContentLoaded', renderLogin);
-} else {
-  const observer = new MutationObserver(applySessionRules);
-  observer.observe(document.querySelector('#app'), { childList: true, subtree: true });
-  applySessionRules();
 }

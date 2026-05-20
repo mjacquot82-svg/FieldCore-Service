@@ -240,6 +240,30 @@ input, select {
   font-size: 0.82rem;
 }
 
+.login-shell {
+  padding: 1rem;
+  margin: 0 auto;
+  max-width: 640px;
+}
+
+.login-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.login-card h1 {
+  margin: 0;
+}
+
+.login-card p {
+  color: #475569;
+  margin: 0;
+}
+
+.login-card .service-form {
+  padding: 1rem;
+}
+
 @media (min-width: 720px) {
   .customer-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .service-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
