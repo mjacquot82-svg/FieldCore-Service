@@ -407,7 +407,7 @@ function bindEvents() {
     bindRouteBuilderEvents(state, saveState, (date) => { selectedRouteBuilderDate = date; }, render);
   }
   if (activeView === 'employees') {
-    bindEmployeeEvents();
+    bindEmployeeEvents(render);
   }
   app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', () => {
     const [visitId, action] = button.dataset.workerAction.split(':');

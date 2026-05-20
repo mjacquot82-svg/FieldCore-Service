@@ -39,7 +39,10 @@ export function renderEmployees() {
           <input name="name" placeholder="Employee name" required />
         </label>
         <label>Role
-          <input name="role" placeholder="Worker, crew lead, admin" value="Worker" />
+          <select name="role">
+            <option value="Worker" selected>Worker</option>
+            <option value="Owner/Admin">Owner/Admin</option>
+          </select>
         </label>
         <label>4-digit PIN
           <input name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="1234" required />
@@ -55,7 +58,7 @@ export function renderEmployees() {
   `;
 }
 
-export function bindEmployeeEvents() {
+export function bindEmployeeEvents(render) {
   const form = document.querySelector('#employee-form');
   if (form) {
     form.addEventListener('submit', (event) => {
@@ -85,7 +88,13 @@ export function bindEmployeeEvents() {
 
       state.employees = [...(state.employees || []), employee];
       saveState(state);
-      renderEmployees();
+      if (typeof render === 'function') return render();
+      const main = document.querySelector('main.content');
+      if (main) {
+        main.innerHTML = renderEmployees();
+        bindEmployeeEvents(render);
+      }
+      return;
     });
   }
 
@@ -102,7 +111,13 @@ export function bindEmployeeEvents() {
       );
 
       saveState(state);
-      renderEmployees();
+      if (typeof render === 'function') return render();
+      const main = document.querySelector('main.content');
+      if (main) {
+        main.innerHTML = renderEmployees();
+        bindEmployeeEvents(render);
+      }
+      return;
     });
   });
 
@@ -124,7 +139,13 @@ export function bindEmployeeEvents() {
       );
 
       saveState(state);
-      renderEmployees();
+      if (typeof render === 'function') return render();
+      const main = document.querySelector('main.content');
+      if (main) {
+        main.innerHTML = renderEmployees();
+        bindEmployeeEvents(render);
+      }
+      return;
     });
   });
 }
