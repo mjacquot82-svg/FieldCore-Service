@@ -26,14 +26,11 @@ function employeeCard(employee) {
 
 export function renderEmployees() {
   const state = loadState();
-  if (!state) return;
-
-  const main = document.querySelector('main.content');
-  if (!main) return;
+  if (!state) return '<section><p>Employees data not available.</p></section>';
 
   const employees = state.employees || [];
 
-  main.innerHTML = `
+  return `
     <section>
       <h2>Employees</h2>
       <form id="employee-form" class="panel service-form">
@@ -56,8 +53,6 @@ export function renderEmployees() {
       </div>
     </section>
   `;
-
-  bindEmployeeEvents();
 }
 
 export function bindEmployeeEvents() {
