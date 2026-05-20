@@ -29,6 +29,22 @@ function getSelectedRouteDate() {
   return document.querySelector('#route-date')?.value || new Date().toISOString().slice(0, 10);
 }
 
+function getWeekdayName(date) {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+function normalizePreferredDay(value) {
+  const day = String(value || '').trim();
+  if (!day || day === 'Unassigned') return 'No preference';
+  return day;
+}
+
+function getCustomerPreferredDay(customer) {
+  return normalizePreferredDay(customer?.preferred_service_day || customer?.preferred_day);
+}
+
 function visitIsInvoiced(visit, state) {
   return (state.invoices || []).some((invoice) =>
     Array.isArray(invoice.visit_ids) && invoice.visit_ids.includes(visit.visit_id)
@@ -55,7 +71,9 @@ function getRouteMetrics(visits, state) {
   const remaining = visits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
   const readyToBillVisits = visits.filter((visit) => visit.status === 'completed' && !visitIsInvoiced(visit, state));
   const readyToBillValue = readyToBillVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
-  return { scheduled, completed, skipped, remaining, readyToBillVisits, readyToBillValue };
+  const unassigned = visits.filter((visit) => !visit.worker_name && !visit.assigned_worker && !visit.route_name).length;
+
+  return { scheduled, completed, skipped, remaining, readyToBillVisits, readyToBillValue, unassigned };
 }
 
 function getWorkerName(visit) {
@@ -75,6 +93,11 @@ function renderStat(label, value) {
   return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
 }
 
+function renderHealthIndicator(label, condition) {
+  if (!condition) return '';
+  return `<span class="badge outstanding">⚠ ${label}</span>`;
+}
+
 function stopStateClass(visit) {
   if (visit.status === 'completed') return 'completed';
   if (visit.status === 'skipped') return 'skipped';
@@ -92,9 +115,17 @@ function renderRouteStop(visit, index, customers, properties) {
   const customer = customers[property?.customer_id];
   const stateClass = stopStateClass(visit);
   const serviceText = visit.service_description || property?.service_type || 'Service';
+  const preferredDay = getCustomerPreferredDay(customer);
+  const routeDay = getWeekdayName(visit.visit_date || getSelectedRouteDate());
+  const preferredMatch = preferredDay !== 'No preference' && preferredDay === routeDay;
+  const preferredStatus = preferredMatch
+    ? '<span class="badge paid-up">matches today</span>'
+    : preferredDay !== 'No preference'
+      ? '<span class="badge outstanding">off-day visit</span>'
+      : '';
 
   return `
-    <article class="panel route-flow-stop ${stateClass}">
+    <article class="panel route-flow-stop ${stateClass} ${preferredDay !== 'No preference' && !preferredMatch ? 'off-day-preference' : ''}">
       <div class="route-stop-index">
         <p class="route-stop-kicker">Stop ${index + 1}</p>
         <span>${stopStateLabel(visit)}</span>
@@ -103,6 +134,7 @@ function renderRouteStop(visit, index, customers, properties) {
         <h3>${customer?.name || 'Unknown Customer'}</h3>
         <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
         <p class="route-stop-service">${serviceText}</p>
+        <p class="route-stop-preferred">Preferred: ${preferredDay} ${preferredStatus}</p>
       </div>
       <div class="actions route-stop-actions">
         <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
@@ -160,17 +192,29 @@ function enhanceTodayRoute(force = false) {
   const routeGroups = groupVisitsByWorker(visits);
   const dateControl = section.querySelector('#route-date')?.closest('.panel')?.outerHTML || '';
 
+  const healthIndicators = `
+    <div class="route-health-indicators">
+      ${renderHealthIndicator(`${metrics.unassigned} unassigned stops`, metrics.unassigned > 0)}
+      ${renderHealthIndicator(`${metrics.skipped} skipped visits`, metrics.skipped > 0)}
+    </div>
+  `;
+
   section.dataset.todayRouteFlow = 'true';
   section.classList.add('today-route-flow');
   section.innerHTML = `
     <div class="panel route-summary-header">
-      <div class="customer-card-header">
+      <div class="customer-card-header route-summary-title-row">
         <div>
           <h2>${isOverdueView ? 'Overdue Visits' : 'Today’s Route'}</h2>
           <p>${isOverdueView ? 'Scheduled visits older than today.' : `Daily operations view for ${date}.`}</p>
         </div>
-        <div class="actions">
-          <button type="button" data-flow-ready-to-bill>Open Ready to Bill</button>
+        <div class="actions route-billing-cta">
+          <div class="billing-summary">
+            <span class="billing-label">Ready to Bill</span>
+            <strong class="billing-value">${currency(metrics.readyToBillValue)}</strong>
+          </div>
+          ${metrics.readyToBillValue > 0 ? '<button type="button" class="primary" data-flow-create-invoices>Create invoices now</button>' : ''}
+          <button type="button" data-flow-ready-to-bill>Open Billing Queue →</button>
         </div>
       </div>
       <div class="route-flow-stats">
@@ -178,9 +222,10 @@ function enhanceTodayRoute(force = false) {
         ${renderStat('Visits Scheduled', visits.length)}
         ${renderStat('Completed', metrics.completed)}
         ${renderStat('Remaining', metrics.remaining)}
-        ${renderStat('Ready to Bill', currency(metrics.readyToBillValue))}
+        ${renderStat('Skipped', metrics.skipped)}
       </div>
-      <p><strong>Today’s Route is for daily operations.</strong> Ready-to-Bill is shown as a secondary shortcut for completed, uninvoiced visits.</p>
+      ${healthIndicators}
+      <p><strong>Today’s Route is for daily operations.</strong> Completed, uninvoiced work is shown beside the Billing Queue shortcut.</p>
     </div>
     ${dateControl}
     <div class="stack worker-route-list">
@@ -251,6 +296,14 @@ function goToReadyToBill() {
 }
 
 function handleFlowClick(event) {
+  const createInvoicesButton = event.target.closest('[data-flow-create-invoices]');
+  if (createInvoicesButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    goToReadyToBill();
+    return;
+  }
+
   const readyButton = event.target.closest('[data-flow-ready-to-bill]');
   if (readyButton) {
     event.preventDefault();
