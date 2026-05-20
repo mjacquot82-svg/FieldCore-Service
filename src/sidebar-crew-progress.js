@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+const SESSION_KEY = 'fieldcore_current_session_v1';
 
 function loadState() {
   try {
@@ -6,6 +7,18 @@ function loadState() {
   } catch {
     return null;
   }
+}
+
+function getSession() {
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function isWorkerSession() {
+  return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
 }
 
 function today() {
@@ -34,6 +47,11 @@ function getCrewProgress(state) {
 function renderCrewProgress() {
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
+
+  if (isWorkerSession()) {
+    sidebar.querySelector('[data-crew-progress-dock]')?.remove();
+    return;
+  }
 
   const state = loadState();
   if (!state) return;

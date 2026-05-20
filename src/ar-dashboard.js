@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+const SESSION_KEY = 'fieldcore_current_session_v1';
 const AR_DASHBOARD_ID = 'ar-dashboard';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
@@ -12,6 +13,18 @@ function loadState() {
   } catch {
     return null;
   }
+}
+
+function getSession() {
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function isWorkerSession() {
+  return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
 }
 
 function customerMap(state) {
@@ -111,6 +124,11 @@ function summarizeCustomers(openInvoices, customers) {
 }
 
 function addArDashboardNav() {
+  if (isWorkerSession()) {
+    document.querySelectorAll(`[data-enhanced-nav="${AR_DASHBOARD_ID}"]`).forEach((button) => button.remove());
+    return;
+  }
+
   document.querySelectorAll('nav').forEach((nav) => {
     if (nav.querySelector(`[data-enhanced-nav="${AR_DASHBOARD_ID}"]`)) return;
 
@@ -298,6 +316,7 @@ document.addEventListener('click', (event) => {
   if (!arButton) return;
 
   event.preventDefault();
+  if (isWorkerSession()) return;
   setActiveArButton();
   renderArDashboard();
 });

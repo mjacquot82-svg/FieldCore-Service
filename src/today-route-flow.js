@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+const SESSION_KEY = 'fieldcore_current_session_v1';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -11,6 +12,18 @@ function loadState() {
   } catch {
     return null;
   }
+}
+
+function getSession() {
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function isWorkerSession() {
+  return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
 }
 
 function saveState(state) {
@@ -176,6 +189,8 @@ function findRouteSection() {
 }
 
 function enhanceTodayRoute(force = false) {
+  if (isWorkerSession()) return;
+
   const section = findRouteSection();
   if (!section || (section.dataset.todayRouteFlow === 'true' && !force)) return;
 
@@ -292,6 +307,7 @@ function skipAndRescheduleVisit(visitId) {
 }
 
 function goToReadyToBill() {
+  if (isWorkerSession()) return;
   document.querySelector('[data-nav="batch"]')?.click();
 }
 

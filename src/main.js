@@ -15,7 +15,7 @@ import { renderEmployees, bindEmployeeEvents } from './employees.js';
 const app = document.querySelector('#app');
 let state = loadState();
 let currentSession = getSession();
-let activeView = currentSession?.role === 'employee' ? 'worker-route' : 'dashboard';
+let activeView = ['employee', 'worker'].includes(String(currentSession?.role || '').toLowerCase()) ? 'worker-route' : 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
 let selectedRouteBuilderDate = new Date().toISOString().slice(0, 10);
@@ -35,10 +35,33 @@ const ALL_NAV_ITEMS = [
   ['settings', 'Settings']
 ];
 
+const WORKER_NAV_ITEMS = [['worker-route', 'My Route']];
+const WORKER_ROLES = new Set(['employee', 'worker']);
+const ADMIN_VIEWS = new Set([
+  'dashboard',
+  'today-route',
+  'route-builder',
+  'employees',
+  'customers',
+  'timeline',
+  'properties',
+  'visits',
+  'batch',
+  'invoices',
+  'payments',
+  'settings'
+]);
+
+function isWorkerSession(session) {
+  return WORKER_ROLES.has(String(session?.role || '').toLowerCase());
+}
+
+function isAdminView(view) {
+  return ADMIN_VIEWS.has(view);
+}
+
 function getNavItems(session) {
-  if (session?.role === 'employee') {
-    return [['worker-route', 'My Route']];
-  }
+  if (isWorkerSession(session)) return WORKER_NAV_ITEMS;
   return ALL_NAV_ITEMS;
 }
 
@@ -192,7 +215,7 @@ function render() {
     return;
   }
 
-  if (currentSession.role === 'employee') {
+  if (isWorkerSession(currentSession)) {
     activeView = 'worker-route';
   } else if (activeView === 'worker-route') {
     activeView = 'dashboard';
@@ -209,13 +232,14 @@ function render() {
   const companyName = state.company?.name?.trim() || 'ServiceBatch';
   const navItems = getNavItems(currentSession);
   const sessionBanner = renderSessionBanner(currentSession);
-  const overdueBanner = currentSession.role === 'employee' ? '' : renderOverdueVisitBanner(propertyMap, customerMap);
+  const overdueBanner = isWorkerSession(currentSession) ? '' : renderOverdueVisitBanner(propertyMap, customerMap);
 
   app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${sessionBanner}${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${overdueBanner}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
   bindEvents();
 }
 
 function renderView(view, metrics, customerMap, propertyMap) {
+  if (isWorkerSession(currentSession) && isAdminView(view)) return renderWorkerRoute(currentSession);
   if (view === 'dashboard') return renderDashboard(metrics);
   if (view === 'worker-route') return renderWorkerRoute(currentSession);
   if (view === 'route-builder') return renderRouteBuilder(state, selectedRouteBuilderDate);
@@ -384,11 +408,41 @@ function reloadStateAndRender() {
 }
 
 function bindEvents() {
-  app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.nav; selectedCustomerId = ''; showOverdueRoute = false; flashMessage = ''; render(); }));
+  app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
+    const nextView = button.dataset.nav;
+    if (isWorkerSession(currentSession) && nextView !== 'worker-route') {
+      activeView = 'worker-route';
+      selectedCustomerId = '';
+      showOverdueRoute = false;
+      flashMessage = '';
+      render();
+      return;
+    }
+    activeView = nextView;
+    selectedCustomerId = '';
+    showOverdueRoute = false;
+    flashMessage = '';
+    render();
+  }));
   app.querySelectorAll('[data-overdue-visits]').forEach((button) => button.addEventListener('click', () => { activeView = 'today-route'; selectedCustomerId = ''; showOverdueRoute = true; flashMessage = 'Showing overdue visits.'; render(); }));
   app.querySelectorAll('[data-clear-overdue-route]').forEach((button) => button.addEventListener('click', () => { showOverdueRoute = false; flashMessage = ''; render(); }));
   app.querySelectorAll('[data-letter-filter]').forEach((button) => button.addEventListener('click', () => { selectedCustomerLetter = button.dataset.letterFilter; render(); }));
-  app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => { const [view, customerId] = button.dataset.customerNav.split(':'); activeView = view; selectedCustomerId = customerId; showOverdueRoute = false; flashMessage = ''; render(); }));
+  app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => {
+    if (isWorkerSession(currentSession)) {
+      activeView = 'worker-route';
+      selectedCustomerId = '';
+      showOverdueRoute = false;
+      flashMessage = '';
+      render();
+      return;
+    }
+    const [view, customerId] = button.dataset.customerNav.split(':');
+    activeView = view;
+    selectedCustomerId = customerId;
+    showOverdueRoute = false;
+    flashMessage = '';
+    render();
+  }));
   const customerForm = app.querySelector('#customer-form');
   if (customerForm) customerForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(customerForm); const name = String(formData.get('name') || '').trim(); if (!name) return; state.customers = [...state.customers, { customer_id: makeId('cust'), company_id: state.company.company_id, name, phone: formData.get('phone') || '', email: formData.get('email') || '', billing_address: formData.get('billing_address') || '', status: 'active', created_at: new Date().toISOString() }]; selectedCustomerLetter = 'all'; saveState(state); flashMessage = 'Customer added.'; render(); });
   app.querySelectorAll('[data-customer-edit]').forEach((button) => button.addEventListener('click', () => { const customerId = button.dataset.customerEdit; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; const name = window.prompt('Customer name:', customer.name); if (!name) return; const phone = window.prompt('Phone:', customer.phone || ''); if (phone === null) return; const email = window.prompt('Email:', customer.email || ''); if (email === null) return; const billingAddress = window.prompt('Billing address:', customer.billing_address || ''); if (billingAddress === null) return; const status = window.prompt('Status (active or inactive):', customer.status || 'active'); if (!status) return; state.customers = state.customers.map((c) => c.customer_id === customerId ? { ...c, name, phone, email, billing_address: billingAddress, status } : c); saveState(state); flashMessage = 'Customer updated.'; render(); }));
@@ -423,7 +477,16 @@ function bindEvents() {
     render();
   }));
   const logoutButton = app.querySelector('[data-logout]');
-  if (logoutButton) logoutButton.addEventListener('click', () => { clearSession(); currentSession = null; activeView = 'dashboard'; flashMessage = ''; render(); });
+  if (logoutButton) logoutButton.addEventListener('click', () => {
+    clearSession();
+    currentSession = null;
+    activeView = 'dashboard';
+    selectedCustomerId = '';
+    selectedCustomerLetter = 'all';
+    showOverdueRoute = false;
+    flashMessage = '';
+    render();
+  });
   const resetButton = app.querySelector('#reset-seed');
   if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; selectedRouteBuilderDate = today(); showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
   app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));

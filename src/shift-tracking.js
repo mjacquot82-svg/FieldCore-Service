@@ -21,6 +21,10 @@ function getSession() {
   }
 }
 
+function isWorkerSession(session) {
+  return ['employee', 'worker'].includes(String(session?.role || '').toLowerCase());
+}
+
 function ensureShiftArray(state) {
   if (!state.shifts) state.shifts = [];
 }
@@ -75,7 +79,7 @@ function getActiveShift(employeeId) {
 
 function renderShiftBanner() {
   const session = getSession();
-  if (!session || session.role !== 'employee') return;
+  if (!session || !isWorkerSession(session)) return;
 
   const container = document.querySelector('[data-session-banner]');
   if (!container) return;

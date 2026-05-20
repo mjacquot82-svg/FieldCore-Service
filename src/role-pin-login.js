@@ -125,7 +125,7 @@ export function bindLoginEvents() {
       }
 
       setSession({
-        role: 'employee',
+        role: 'worker',
         employee_id: employee.employee_id,
         name: employee.name,
         started_at: new Date().toISOString()

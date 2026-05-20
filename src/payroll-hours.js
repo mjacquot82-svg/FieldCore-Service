@@ -21,6 +21,10 @@ function getSession() {
   }
 }
 
+function isWorkerSession(session) {
+  return ['employee', 'worker'].includes(String(session?.role || '').toLowerCase());
+}
+
 function todayString() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -88,7 +92,7 @@ function formatTime(value) {
 function employeeMyHoursPanel() {
   const state = loadState();
   const session = getSession();
-  if (!state || !session || session.role !== 'employee') return '';
+  if (!state || !session || !isWorkerSession(session)) return '';
 
   const weekStart = payrollWeekStartIndex(state);
   const period = getPayrollPeriod(new Date(), weekStart);
@@ -113,7 +117,7 @@ function employeeMyHoursPanel() {
 
 function injectEmployeeHoursPanel() {
   const session = getSession();
-  if (!session || session.role !== 'employee') return;
+  if (!session || !isWorkerSession(session)) return;
 
   const main = document.querySelector('main.content');
   if (!main || main.querySelector('[data-my-hours-panel]')) return;
