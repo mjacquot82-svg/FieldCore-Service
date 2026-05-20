@@ -1,33 +1,10 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-const EMPLOYEES_VIEW_ID = 'employees';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
+import { loadState, saveState } from './lib/store.js';
 
 function makeEmployeeId() {
   return `emp_${crypto.randomUUID().slice(0, 8)}`;
 }
 
-function addEmployeesNav() {
-  document.querySelectorAll('nav').forEach((nav) => {
-    if (nav.querySelector(`[data-enhanced-nav="${EMPLOYEES_VIEW_ID}"]`)) return;
 
-    const button = document.createElement('button');
-    button.className = 'nav-btn';
-    button.dataset.enhancedNav = EMPLOYEES_VIEW_ID;
-    button.textContent = 'Employees';
-    nav.appendChild(button);
-  });
-}
 
 function employeeCard(employee) {
   return `
@@ -47,7 +24,7 @@ function employeeCard(employee) {
   `;
 }
 
-function renderEmployees() {
+export function renderEmployees() {
   const state = loadState();
   if (!state) return;
 
@@ -83,7 +60,7 @@ function renderEmployees() {
   bindEmployeeEvents();
 }
 
-function bindEmployeeEvents() {
+export function bindEmployeeEvents() {
   const form = document.querySelector('#employee-form');
   if (form) {
     form.addEventListener('submit', (event) => {
@@ -157,21 +134,3 @@ function bindEmployeeEvents() {
   });
 }
 
-function setActiveEmployeesButton() {
-  document.querySelectorAll('.nav-btn').forEach((button) => button.classList.remove('active'));
-  document.querySelectorAll(`[data-enhanced-nav="${EMPLOYEES_VIEW_ID}"]`).forEach((button) => button.classList.add('active'));
-}
-
-document.addEventListener('click', (event) => {
-  const employeesButton = event.target.closest(`[data-enhanced-nav="${EMPLOYEES_VIEW_ID}"]`);
-  if (!employeesButton) return;
-
-  event.preventDefault();
-  setActiveEmployeesButton();
-  renderEmployees();
-});
-
-const observer = new MutationObserver(addEmployeesNav);
-observer.observe(document.querySelector('#app'), { childList: true, subtree: true });
-
-addEmployeesNav();

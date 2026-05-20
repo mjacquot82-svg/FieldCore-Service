@@ -10,6 +10,7 @@ import {
 } from './lib/store.js';
 import { getSession, clearSession, renderLogin } from './role-pin-login.js';
 import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
+import { renderEmployees, bindEmployeeEvents } from './employees.js';
 
 const app = document.querySelector('#app');
 let state = loadState();
@@ -26,6 +27,7 @@ const ALL_NAV_ITEMS = [
   ['dashboard', 'Dashboard'],
   ['today-route', 'Today’s Route'],
   ['route-builder', 'Route Builder'],
+  ['employees', 'Employees'],
   ['customers', 'Customers'],
   ['batch', 'Ready to Bill'],
   ['invoices', 'Invoices'],
@@ -217,6 +219,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
   if (view === 'dashboard') return renderDashboard(metrics);
   if (view === 'worker-route') return renderWorkerRoute(currentSession);
   if (view === 'route-builder') return renderRouteBuilder(state, selectedRouteBuilderDate);
+  if (view === 'employees') return renderEmployees();
   if (view === 'customers') return renderCustomers();
   if (view === 'timeline') return renderTimeline(customerMap, propertyMap);
   if (view === 'properties') return renderProperties(customerMap);
@@ -402,6 +405,9 @@ function bindEvents() {
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   if (activeView === 'route-builder') {
     bindRouteBuilderEvents(state, saveState, (date) => { selectedRouteBuilderDate = date; }, render);
+  }
+  if (activeView === 'employees') {
+    bindEmployeeEvents();
   }
   app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', () => {
     const [visitId, action] = button.dataset.workerAction.split(':');
