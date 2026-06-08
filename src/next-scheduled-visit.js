@@ -1,12 +1,8 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
+import {
+  getNextScheduledVisitForProperty,
+  getScheduledVisitsForProperty,
+  getStateSnapshot
+} from './data/repositories/visitReadRepository.js';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -19,29 +15,16 @@ function findPropertyForCard(card, state) {
 }
 
 function getNextScheduledVisit(state, propertyId) {
-  return (state.visits || [])
-    .filter((visit) =>
-      visit.property_id === propertyId
-      && visit.status === 'scheduled'
-      && visit.visit_date
-      && visit.visit_date >= today()
-    )
-    .sort((a, b) => a.visit_date.localeCompare(b.visit_date))[0];
+  return getNextScheduledVisitForProperty(propertyId, today());
 }
 
 function getOverdueVisit(state, propertyId) {
-  return (state.visits || [])
-    .filter((visit) =>
-      visit.property_id === propertyId
-      && visit.status === 'scheduled'
-      && visit.visit_date
-      && visit.visit_date < today()
-    )
-    .sort((a, b) => a.visit_date.localeCompare(b.visit_date))[0];
+  return getScheduledVisitsForProperty(propertyId)
+    .filter((visit) => visit.visit_date < today())[0];
 }
 
 function addNextScheduledVisitIndicators() {
-  const state = loadState();
+  const state = getStateSnapshot();
   if (!state) return;
 
   document.querySelectorAll('article.panel').forEach((card) => {

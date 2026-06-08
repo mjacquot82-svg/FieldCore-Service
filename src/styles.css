@@ -143,9 +143,137 @@ input, select {
   opacity: 0.55;
   cursor: not-allowed;
 }
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .overdue-card {
   border-left: 4px solid #d32f2f;
   background: #fff5f5;
+}
+
+.ready-bill-queue {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.ready-bill-summary {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+.ready-bill-toolbar {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ready-bill-controls {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.ready-bill-controls .eyebrow {
+  margin: 0 0 0.4rem;
+}
+
+.ready-bill-filter-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ready-bill-filter-buttons button {
+  width: auto;
+  min-width: 5.75rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.ready-bill-filter-buttons button.active {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+
+.ready-bill-sort {
+  margin: 0;
+}
+
+.ready-bill-toolbar h3,
+.ready-bill-toolbar p {
+  margin: 0.2rem 0;
+}
+
+.ready-bill-actions {
+  align-items: center;
+}
+
+.ready-bill-actions button {
+  flex: 1 1 130px;
+}
+
+.ready-bill-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.ready-bill-row {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.ready-bill-row.selected {
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.12);
+}
+
+.ready-bill-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  color: #475569;
+  font-size: 0.88rem;
+}
+
+.ready-bill-check input {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.ready-bill-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.ready-bill-main strong,
+.ready-bill-main p,
+.ready-bill-detail span,
+.ready-bill-detail strong {
+  overflow-wrap: anywhere;
+}
+
+.ready-bill-main p {
+  margin: 0.25rem 0 0;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.ready-bill-detail {
+  display: grid;
+  gap: 0.35rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.ready-bill-detail strong {
+  color: #0f172a;
 }
 
 /* V1 stabilization density pass */
@@ -267,6 +395,26 @@ input, select {
 @media (min-width: 720px) {
   .customer-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .service-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ready-bill-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ready-bill-row {
+    grid-template-columns: minmax(130px, 0.55fr) minmax(260px, 1.4fr) minmax(240px, 1fr);
+    align-items: center;
+  }
+  .ready-bill-detail {
+    grid-template-columns: minmax(90px, 0.7fr) minmax(140px, 1fr) minmax(80px, auto);
+    align-items: center;
+  }
+  .ready-bill-detail strong {
+    text-align: right;
+  }
+  .ready-bill-toolbar {
+    grid-template-columns: minmax(260px, 1fr) minmax(360px, auto);
+    align-items: center;
+  }
+  .ready-bill-controls {
+    grid-template-columns: minmax(360px, 1fr) minmax(180px, 240px);
+    align-items: end;
+  }
 }
 @media (min-width: 920px) {
   .layout {

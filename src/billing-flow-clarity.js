@@ -14,9 +14,14 @@ function enhanceBillingQueue() {
   const heading = section.querySelector('h2');
   if (heading) heading.textContent = 'Billing Queue';
 
+  if (section.matches('[data-ready-bill-queue]') || section.querySelector('[data-ready-bill-queue]')) {
+    section.dataset.billingQueueClarity = 'true';
+    return;
+  }
+
   const intro = section.querySelector('p');
   if (intro) {
-    intro.textContent = 'Completed work waits here until the office is ready to generate invoices. Use the date range to batch completed, uninvoiced visits into customer invoices.';
+    intro.textContent = 'Completed work waits here until the office is ready to review and generate customer invoices.';
   }
 
   const form = section.querySelector('#batch-form');
@@ -30,7 +35,7 @@ function enhanceBillingQueue() {
     <ol>
       <li><strong>Today’s Route:</strong> workers mark visits completed.</li>
       <li><strong>Billing Queue:</strong> completed, uninvoiced work collects here.</li>
-      <li><strong>Generate Customer Invoices:</strong> visits are grouped by customer and turned into invoices.</li>
+      <li><strong>Generate Customer Invoices:</strong> selected visits are grouped by customer and turned into invoices.</li>
       <li><strong>Invoices:</strong> created invoices move to the invoice archive/control center.</li>
       <li><strong>Payments:</strong> record payment and track unpaid or overdue balances.</li>
     </ol>

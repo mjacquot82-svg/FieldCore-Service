@@ -225,10 +225,14 @@
 
 .route-stop-card.already-routed {
   background: #f8fafc;
-  opacity: 0.78;
+  border-color: #cbd5e1;
 }
 
-.route-stop-card input {
+.route-stop-select {
+  margin: 0;
+}
+
+.route-stop-select input {
   margin-top: 0.35rem;
 }
 
@@ -267,6 +271,18 @@
 
 .route-stop-main small {
   color: #64748b;
+}
+
+.route-stop-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.route-stop-actions button,
+.route-stop-actions select {
+  width: 100%;
 }
 
 .route-section-header {
@@ -596,6 +612,11 @@
 
   .route-form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-stop-actions {
+    grid-template-columns: minmax(180px, 1fr) minmax(110px, 140px) minmax(140px, 180px);
+    align-items: center;
   }
 
   .route-flow-stats {

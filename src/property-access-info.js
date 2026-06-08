@@ -1,16 +1,11 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
+import {
+  getProperty,
+  listProperties,
+  updateAccessInfo
+} from './data/repositories/propertyRepository.js';
+import {
+  getStateSnapshot
+} from './data/repositories/visitReadRepository.js';
 
 function propertyMap(state) {
   return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
@@ -42,7 +37,7 @@ function accessInfoLines(property) {
 }
 
 function showAccessInfoOnRouteCards() {
-  const state = loadState();
+  const state = getStateSnapshot();
   if (!state) return;
 
   const properties = propertyMap(state);
@@ -79,8 +74,7 @@ function findPropertyForPropertyCard(card, state) {
 }
 
 function addAccessEditButtonsToPropertyCards() {
-  const state = loadState();
-  if (!state) return;
+  const state = { properties: listProperties() };
 
   document.querySelectorAll('article.panel').forEach((card) => {
     if (card.querySelector('[data-edit-access-info]')) return;
@@ -100,10 +94,7 @@ function addAccessEditButtonsToPropertyCards() {
 }
 
 function editAccessInfo(propertyId) {
-  const state = loadState();
-  if (!state) return;
-
-  const property = (state.properties || []).find((item) => item.property_id === propertyId);
+  const property = getProperty(propertyId);
   if (!property) return;
 
   const gateCode = window.prompt('Gate code:', property.gate_code || '');
@@ -118,19 +109,12 @@ function editAccessInfo(propertyId) {
   const hazards = window.prompt('Hazards / warnings:', property.hazards || '');
   if (hazards === null) return;
 
-  state.properties = (state.properties || []).map((item) =>
-    item.property_id === propertyId
-      ? {
-          ...item,
-          gate_code: gateCode.trim(),
-          access_notes: accessNotes.trim(),
-          parking_notes: parkingNotes.trim(),
-          hazards: hazards.trim()
-        }
-      : item
-  );
-
-  saveState(state);
+  updateAccessInfo(propertyId, {
+    gate_code: gateCode.trim(),
+    access_notes: accessNotes.trim(),
+    parking_notes: parkingNotes.trim(),
+    hazards: hazards.trim()
+  });
   window.location.reload();
 }
 

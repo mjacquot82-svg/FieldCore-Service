@@ -28,6 +28,44 @@ function getRouteMetrics(visits, savedRoutes) {
   return { routedVisitIds, unassignedStops, totalValue };
 }
 
+function getRouteAssignmentMap(routes = []) {
+  return routes.reduce((assignments, route) => {
+    (route.visit_ids || []).forEach((visitId) => {
+      if (!assignments.has(visitId)) assignments.set(visitId, route);
+    });
+    return assignments;
+  }, new Map());
+}
+
+function routeLabel(route) {
+  const worker = route.assigned_worker || 'Unassigned worker';
+  return `${worker} - ${route.name}`;
+}
+
+function removeVisitFromRoutes(routes = [], visitId) {
+  return routes.map((route) => ({
+    ...route,
+    visit_ids: (route.visit_ids || []).filter((id) => id !== visitId)
+  }));
+}
+
+function updateVisitRoute(state, visitId, route) {
+  state.visits = (state.visits || []).map((visit) => {
+    if (visit.visit_id !== visitId) return visit;
+    if (!route) {
+      const { route_id, route_name, route_day, assigned_worker, ...unassignedVisit } = visit;
+      return unassignedVisit;
+    }
+    return {
+      ...visit,
+      route_id: route.route_id,
+      route_name: route.name,
+      route_day: route.route_day,
+      assigned_worker: route.assigned_worker
+    };
+  });
+}
+
 function renderRouteStat(label, value) {
   return `<article class="route-stat"><span>${label}</span><strong>${value}</strong></article>`;
 }
@@ -36,19 +74,30 @@ function renderRouteDaySelect(selectedDay) {
   return `<select name="route_day" required>${routeDays.map((day) => `<option value="${day}" ${day === selectedDay ? 'selected' : ''}>${day}</option>`).join('')}</select>`;
 }
 
-function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new Set()) {
+function renderRouteTargetOptions(savedRoutes, currentRouteId = '') {
+  return savedRoutes.map((route) => `
+    <option value="${route.route_id}" ${route.route_id === currentRouteId ? 'selected' : ''}>${routeLabel(route)}</option>
+  `).join('');
+}
+
+function renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes = []) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
-  const isRouted = routedVisitIds.has(visit.visit_id);
+  const assignedRoute = routeAssignment.get(visit.visit_id);
+  const isRouted = Boolean(assignedRoute);
   const city = (property?.service_address || '').split(',').slice(-2, -1)[0]?.trim();
+  const workerName = assignedRoute?.assigned_worker || visit.assigned_worker || 'Unassigned worker';
+  const routeOptions = renderRouteTargetOptions(savedRoutes, assignedRoute?.route_id);
 
   return `
-    <label class="route-stop-card ${isRouted ? 'already-routed' : ''}">
-      <input type="checkbox" name="visit_id" value="${visit.visit_id}" ${isRouted ? 'disabled' : ''} />
+    <article class="route-stop-card ${isRouted ? 'already-routed' : ''}">
+      <label class="route-stop-select">
+        <input type="checkbox" name="visit_id" value="${visit.visit_id}" ${isRouted ? 'disabled' : ''} />
+      </label>
       <div class="route-stop-main">
         <div class="route-stop-title-row">
           <strong>${customer?.name || 'Unknown Customer'}</strong>
-          <span class="badge ${isRouted ? 'outstanding' : 'paid-up'}">${isRouted ? 'Routed' : 'Open'}</span>
+          <span class="badge ${isRouted ? 'outstanding' : 'paid-up'}">${isRouted ? `Assigned to: ${workerName}` : 'Unassigned'}</span>
         </div>
         <p>${property?.service_address || 'Unknown address'}</p>
         <div class="route-stop-meta">
@@ -56,10 +105,18 @@ function renderVisitCheckbox(visit, customers, properties, routedVisitIds = new 
           <span>${property?.service_type || 'Service'}</span>
           <span>${currency(visit.price)}</span>
           ${city ? `<span>${city}</span>` : ''}
+          ${assignedRoute ? `<span>${assignedRoute.name}</span>` : ''}
         </div>
         ${visit.notes ? `<small>${visit.notes}</small>` : ''}
+        <div class="route-stop-actions">
+          <select data-route-target="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>
+            ${routeOptions || '<option value="">No saved routes</option>'}
+          </select>
+          <button type="button" data-route-move-stop="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>${isRouted ? 'Reassign' : 'Assign'}</button>
+          ${isRouted ? `<button type="button" data-route-remove-stop="${visit.visit_id}">Remove from Route</button>` : ''}
+        </div>
       </div>
-    </label>
+    </article>
   `;
 }
 
@@ -97,6 +154,7 @@ export function renderRouteBuilder(state, date = today()) {
   const routeDay = weekdayForDate(date);
   const visits = scheduledVisitsForDate(state, date);
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
+  const routeAssignment = getRouteAssignmentMap(savedRoutes);
   const metrics = getRouteMetrics(visits, savedRoutes);
 
   return `
@@ -138,9 +196,9 @@ export function renderRouteBuilder(state, date = today()) {
             <input name="route_name" placeholder="North Route, Franklin Route, Commercial Route" required />
           </label>
         </div>
-        <h4>Stops available for ${routeDay} preview (${date})</h4>
+        <h4>Scheduled stops for ${routeDay} preview (${date})</h4>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, metrics.routedVisitIds)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
+          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
       </form>
 
@@ -171,7 +229,8 @@ export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, 
     event.preventDefault();
 
     const formData = new FormData(form);
-    const selectedVisitIds = formData.getAll('visit_id');
+    const assignmentMap = getRouteAssignmentMap(state.routes || []);
+    const selectedVisitIds = [...new Set(formData.getAll('visit_id'))].filter((visitId) => !assignmentMap.has(visitId));
     const routeDay = String(formData.get('route_day') || weekdayForDate(dateInput?.value || today())).trim();
     const routeName = String(formData.get('route_name') || '').trim();
     const assignedWorker = String(formData.get('assigned_worker') || '').trim();
@@ -179,25 +238,61 @@ export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, 
 
     if (!routeName || selectedVisitIds.length === 0) return;
 
-    const route = {
+    const existingRoute = (state.routes || []).find((route) =>
+      route.route_date === routeDate &&
+      route.route_day === routeDay &&
+      route.name === routeName &&
+      (route.assigned_worker || '') === assignedWorker
+    );
+    const route = existingRoute || {
       route_id: makeRouteId(),
       company_id: state.company?.company_id,
       name: routeName,
       route_day: routeDay,
       route_date: routeDate,
       assigned_worker: assignedWorker,
-      visit_ids: selectedVisitIds,
+      visit_ids: [],
       created_at: new Date().toISOString()
     };
 
-    state.routes = [...(state.routes || []), route];
-    state.visits = (state.visits || []).map((visit) =>
-      selectedVisitIds.includes(visit.visit_id)
-        ? { ...visit, route_id: route.route_id, route_name: route.name, route_day: route.route_day, assigned_worker: route.assigned_worker }
-        : visit
-    );
+    state.routes = existingRoute
+      ? (state.routes || []).map((savedRoute) => savedRoute.route_id === route.route_id
+        ? { ...savedRoute, visit_ids: [...new Set([...(savedRoute.visit_ids || []), ...selectedVisitIds])] }
+        : savedRoute)
+      : [...(state.routes || []), { ...route, visit_ids: selectedVisitIds }];
+
+    const savedRoute = (state.routes || []).find((saved) => saved.route_id === route.route_id);
+    selectedVisitIds.forEach((visitId) => updateVisitRoute(state, visitId, savedRoute));
 
     saveStateFn(state);
     render();
+  });
+
+  document.querySelectorAll('[data-route-remove-stop]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const visitId = button.dataset.routeRemoveStop;
+      state.routes = removeVisitFromRoutes(state.routes || [], visitId);
+      updateVisitRoute(state, visitId, null);
+      saveStateFn(state);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-route-move-stop]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const visitId = button.dataset.routeMoveStop;
+      const targetSelect = document.querySelector(`[data-route-target="${visitId}"]`);
+      const targetRouteId = targetSelect?.value;
+      const targetRoute = (state.routes || []).find((route) => route.route_id === targetRouteId);
+      if (!visitId || !targetRoute) return;
+
+      state.routes = removeVisitFromRoutes(state.routes || [], visitId).map((route) => route.route_id === targetRoute.route_id
+        ? { ...route, visit_ids: [...new Set([...(route.visit_ids || []), visitId])] }
+        : route);
+      const updatedTargetRoute = (state.routes || []).find((route) => route.route_id === targetRoute.route_id);
+      updateVisitRoute(state, visitId, updatedTargetRoute);
+      saveStateFn(state);
+      render();
+    });
   });
 }

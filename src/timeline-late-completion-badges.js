@@ -1,20 +1,4 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function buildLateCompletionLookup(state) {
-  return new Set(
-    (state?.visits || [])
-      .filter((visit) => visit.status === 'completed' && visit.completed_late)
-      .map((visit) => `${visit.visit_date}|${visit.service_description}`)
-  );
-}
+import { getLateCompletedVisitLookup } from './data/repositories/visitReadRepository.js';
 
 function addLateCompletionBadges() {
   const timelineHeading = [...document.querySelectorAll('section h2')]
@@ -22,8 +6,7 @@ function addLateCompletionBadges() {
 
   if (!timelineHeading) return;
 
-  const state = loadState();
-  const lateCompletedVisits = buildLateCompletionLookup(state);
+  const lateCompletedVisits = getLateCompletedVisitLookup();
   if (!lateCompletedVisits.size) return;
 
   const section = timelineHeading.closest('section');

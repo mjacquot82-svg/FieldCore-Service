@@ -1,12 +1,7 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
+import {
+  getStateSnapshot,
+  hasUpcomingScheduledVisitForProperty
+} from './data/repositories/visitReadRepository.js';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -18,17 +13,8 @@ function findPropertyForCard(card, state) {
   return (state.properties || []).find((property) => property.service_address === heading);
 }
 
-function hasUpcomingVisit(state, propertyId) {
-  return (state.visits || []).some((visit) =>
-    visit.property_id === propertyId
-    && visit.status === 'scheduled'
-    && visit.visit_date
-    && visit.visit_date >= today()
-  );
-}
-
 function addScheduleHealthWarnings() {
-  const state = loadState();
+  const state = getStateSnapshot();
   if (!state) return;
 
   document.querySelectorAll('article.panel').forEach((card) => {
@@ -44,7 +30,7 @@ function addScheduleHealthWarnings() {
 
     const hasActiveRecurringSchedule = property.recurring_schedule?.status === 'active';
     if (!hasActiveRecurringSchedule) return;
-    if (hasUpcomingVisit(state, property.property_id)) return;
+    if (hasUpcomingScheduledVisitForProperty(property.property_id, today())) return;
 
     const warning = document.createElement('p');
     warning.setAttribute('data-schedule-health-warning', 'true');

@@ -51,6 +51,14 @@ Models included:
 - payments
 - settings
 
+### Persistence Centralization Note
+
+Phase 1 of the Supabase migration prep adds a compatibility layer around the existing `servicebatch_invoice_mvp_v1` localStorage state. New persistence work should route through `src/data/storage/local-state-adapter.js` and `src/data/appEventBus.js` before feature modules are migrated to repositories. Existing feature modules still use their current localStorage paths during this phase so app behavior remains unchanged.
+
+The first repository conversion is read-only: `src/data/repositories/visitReadRepository.js` now supplies visit/property reads for the next scheduled visit indicator. This proves the repository path without changing route planning, billing, invoice, payment, or visit lifecycle writes.
+
+The first write repository conversion is intentionally low risk: `src/data/repositories/propertyRepository.js` owns property access-info updates and emits `properties:changed` after successful local adapter writes. Route, visit, billing, invoice, payment, authentication, and shift write paths remain unchanged.
+
 ## Seed Demo Dataset
 
 Preloaded lawn-care scenario includes:
@@ -78,20 +86,21 @@ Then open:
 http://localhost:5173
 ```
 
-## Batch Invoice Workflow
+## Billing Queue Workflow
 
-1. Open **Batch Invoices**.
-2. Select date range.
-3. Click **Generate Batch Invoices**.
-4. System will:
-   - find completed visits in range
-   - skip already billed visits
+1. Open **Billing Queue**.
+2. Filter by Today, This Week, This Month, or All and sort by newest or oldest service date.
+3. Review completed visits individually.
+4. Select the visits that should be invoiced.
+5. Click **Generate Invoices**.
+6. System will:
+   - use only selected completed visits
    - group by customer
    - generate one invoice per customer
    - add visit line items
    - mark visits as billed
-5. Review generated invoices in **Invoices**.
-6. Update payment status in **Payments**.
+7. Review generated invoices in **Invoices**.
+8. Update payment status in **Payments**.
 
 ## Netlify Deployment
 

@@ -1,6 +1,7 @@
 import {
   computeDashboard,
   generateBatchInvoices,
+  generateSelectedVisitInvoices,
   getCustomerMap,
   getPropertyMap,
   loadState,
@@ -22,6 +23,9 @@ let selectedRouteBuilderDate = new Date().toISOString().slice(0, 10);
 let selectedCustomerId = '';
 let selectedCustomerLetter = 'all';
 let showOverdueRoute = false;
+let billingSelectedVisitIds = new Set();
+let billingDateFilter = 'all';
+let billingSortOrder = 'newest';
 
 const ALL_NAV_ITEMS = [
   ['dashboard', 'Dashboard'],
@@ -249,7 +253,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
   if (view === 'properties') return renderProperties(customerMap);
   if (view === 'visits') return renderTimeline(customerMap, propertyMap);
   if (view === 'today-route') return renderTodayRoute(customerMap, propertyMap);
-  if (view === 'batch') return renderBatch();
+  if (view === 'batch') return renderBatch(customerMap, propertyMap);
   if (view === 'invoices') return renderInvoices(customerMap);
   if (view === 'payments') return renderPayments(customerMap);
   return renderSettings();
@@ -380,8 +384,188 @@ function updateWorkerVisitStatus(visitId, action) {
   saveState(state);
 }
 
-function renderBatch() {
-  return `<section><h2>Ready to Bill</h2><p>Select a date range to invoice completed, unbilled visits and group by customer.</p><form id="batch-form" class="panel"><label>Start Date<input type="date" name="start" value="2026-04-01" required/></label><label>End Date<input type="date" name="end" value="2026-04-30" required/></label><button class="primary" type="submit">Generate Batch Invoices</button></form></section>`;
+function getReadyToBillVisits() {
+  return state.visits
+    .filter((visit) => visit.status === 'completed')
+    .sort((a, b) => compareReadyToBillDates(a, b, billingSortOrder));
+}
+
+function getReadyToBillDate(visit) {
+  return visit.completed_at?.slice(0, 10) || visit.visit_date || '';
+}
+
+function dateFromIso(date) {
+  const parsed = new Date(`${date}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function shiftDate(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function toIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getBillingDateRange(filter) {
+  const current = dateFromIso(today());
+  if (!current || filter === 'all') return null;
+
+  if (filter === 'today') {
+    const todayDate = toIsoDate(current);
+    return { start: todayDate, end: todayDate };
+  }
+
+  if (filter === 'week') {
+    const start = shiftDate(current, -current.getDay());
+    const end = shiftDate(start, 6);
+    return { start: toIsoDate(start), end: toIsoDate(end) };
+  }
+
+  if (filter === 'month') {
+    const start = new Date(current.getFullYear(), current.getMonth(), 1);
+    const end = new Date(current.getFullYear(), current.getMonth() + 1, 0);
+    return { start: toIsoDate(start), end: toIsoDate(end) };
+  }
+
+  return null;
+}
+
+function filterReadyToBillVisits(visits, filter) {
+  const range = getBillingDateRange(filter);
+  if (!range) return visits;
+  return visits.filter((visit) => {
+    const billableDate = getReadyToBillDate(visit);
+    return billableDate >= range.start && billableDate <= range.end;
+  });
+}
+
+function compareReadyToBillDates(a, b, sortOrder) {
+  const aDate = getReadyToBillDate(a);
+  const bDate = getReadyToBillDate(b);
+  const direction = sortOrder === 'oldest' ? 1 : -1;
+
+  if (aDate && bDate && aDate !== bDate) return aDate.localeCompare(bDate) * direction;
+  if (aDate && !bDate) return -1;
+  if (!aDate && bDate) return 1;
+  return String(a.visit_id || '').localeCompare(String(b.visit_id || '')) * direction;
+}
+
+function renderBillingFilterButton(filter, label) {
+  return `<button type="button" class="${billingDateFilter === filter ? 'active' : ''}" data-billing-filter="${filter}">${label}</button>`;
+}
+
+function getBillableVisitIds(visits, propertyMap) {
+  return visits
+    .filter((visit) => propertyMap[visit.property_id]?.customer_id)
+    .map((visit) => visit.visit_id);
+}
+
+function trimBillingSelection(visits, propertyMap) {
+  const billableIds = new Set(getBillableVisitIds(visits, propertyMap));
+  billingSelectedVisitIds = new Set([...billingSelectedVisitIds].filter((visitId) => billableIds.has(visitId)));
+}
+
+function renderBillingQueueRow(visit, customerMap, propertyMap) {
+  const property = propertyMap[visit.property_id];
+  const customer = customerMap[property?.customer_id];
+  const canInvoice = Boolean(customer);
+  const isSelected = billingSelectedVisitIds.has(visit.visit_id);
+
+  return `
+    <article class="ready-bill-row ${isSelected ? 'selected' : ''}">
+      <label class="ready-bill-check">
+        <input type="checkbox" data-billing-visit="${visit.visit_id}" ${isSelected ? 'checked' : ''} ${canInvoice ? '' : 'disabled'} />
+        <span>${canInvoice ? 'Select visit' : 'Missing customer'}</span>
+      </label>
+      <div class="ready-bill-main">
+        <div>
+          <strong>${customer?.name || 'Unknown Customer'}</strong>
+          <p>${property?.service_address || 'Unknown service location'}</p>
+        </div>
+        <span class="badge ${canInvoice ? 'paid-up' : 'overdue'}">${canInvoice ? 'ready' : 'needs setup'}</span>
+      </div>
+      <div class="ready-bill-detail">
+        <span>${visit.visit_date || 'No date'}</span>
+        <span>${visit.service_description || property?.service_type || 'Service visit'}</span>
+        <strong>${currency(visit.price)}</strong>
+      </div>
+    </article>
+  `;
+}
+
+function renderBatch(customerMap, propertyMap) {
+  const visits = getReadyToBillVisits();
+  trimBillingSelection(visits, propertyMap);
+  const visibleVisits = filterReadyToBillVisits(visits, billingDateFilter);
+  const visibleBillableVisitIds = getBillableVisitIds(visibleVisits, propertyMap);
+  const selectedVisits = visits.filter((visit) => billingSelectedVisitIds.has(visit.visit_id));
+  const selectedSubtotal = selectedVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
+  const selectedTax = Number((selectedSubtotal * (state.settings.tax_rate ?? 0)).toFixed(2));
+  const selectedInvoiceTotal = Number((selectedSubtotal + selectedTax).toFixed(2));
+  const filterRange = getBillingDateRange(billingDateFilter);
+  const filterSummary = filterRange
+    ? `Showing service dates ${filterRange.start} to ${filterRange.end}.`
+    : 'Showing all service dates.';
+
+  return `
+    <section class="ready-bill-queue" data-ready-bill-queue>
+      <div class="page-header-v1">
+        <div>
+          <h2>Billing Queue</h2>
+          <p>Review completed, uninvoiced visits one by one, then choose the work that should become draft customer invoices.</p>
+        </div>
+      </div>
+
+      <div class="invoice-summary-grid ready-bill-summary">
+        <article class="route-stat"><span>Ready visits</span><strong>${visibleBillableVisitIds.length}</strong></article>
+        <article class="route-stat"><span>Selected visits</span><strong>${selectedVisits.length}</strong></article>
+        <article class="route-stat"><span>Selected amount</span><strong>${currency(selectedSubtotal)}</strong></article>
+        <article class="route-stat"><span>Estimated invoice total</span><strong>${currency(selectedInvoiceTotal)}</strong></article>
+      </div>
+
+      <div class="panel ready-bill-controls">
+        <div>
+          <p class="eyebrow">Filter service date</p>
+          <div class="ready-bill-filter-buttons">
+            ${renderBillingFilterButton('today', 'Today')}
+            ${renderBillingFilterButton('week', 'This Week')}
+            ${renderBillingFilterButton('month', 'This Month')}
+            ${renderBillingFilterButton('all', 'All')}
+          </div>
+        </div>
+        <label class="ready-bill-sort">
+          <span>Sort</span>
+          <select data-billing-sort>
+            <option value="newest" ${billingSortOrder === 'newest' ? 'selected' : ''}>Newest First</option>
+            <option value="oldest" ${billingSortOrder === 'oldest' ? 'selected' : ''}>Oldest First</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="panel ready-bill-toolbar">
+        <div>
+          <p class="eyebrow">Owner review</p>
+          <h3>Completed visits</h3>
+          <p>${visibleVisits.length ? `${visibleVisits.length} of ${visits.length} completed visit${visits.length === 1 ? '' : 's'} shown. ${filterSummary}` : `No completed visits match this filter. ${filterSummary}`}</p>
+        </div>
+        <div class="actions ready-bill-actions">
+          <button type="button" data-billing-select-all ${visibleBillableVisitIds.length ? '' : 'disabled'}>Select All</button>
+          <button type="button" data-billing-clear-all ${selectedVisits.length ? '' : 'disabled'}>Clear All</button>
+          <button type="button" class="primary" data-billing-generate ${selectedVisits.length ? '' : 'disabled'}>Generate Invoices</button>
+        </div>
+      </div>
+
+      <div class="ready-bill-list">
+        ${visibleVisits.length ? visibleVisits.map((visit) => renderBillingQueueRow(visit, customerMap, propertyMap)).join('') : '<article class="panel"><p>No completed visits match this filter.</p></article>'}
+      </div>
+    </section>
+  `;
 }
 
 function renderInvoices(customerMap) {
@@ -459,6 +643,43 @@ function bindEvents() {
   app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; state.properties = state.properties.map((p) => p.property_id === propertyId ? { ...p, status: 'inactive' } : p); saveState(state); flashMessage = 'Service removed from active work.'; render(); }));
   const batchForm = app.querySelector('#batch-form');
   if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateBatchInvoices(state, formData.get('start'), formData.get('end')); saveState(state); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
+  app.querySelectorAll('[data-billing-visit]').forEach((checkbox) => checkbox.addEventListener('change', () => {
+    if (checkbox.checked) billingSelectedVisitIds.add(checkbox.dataset.billingVisit);
+    else billingSelectedVisitIds.delete(checkbox.dataset.billingVisit);
+    render();
+  }));
+  app.querySelectorAll('[data-billing-filter]').forEach((button) => button.addEventListener('click', () => {
+    billingDateFilter = button.dataset.billingFilter || 'all';
+    render();
+  }));
+  const billingSort = app.querySelector('[data-billing-sort]');
+  if (billingSort) billingSort.addEventListener('change', () => {
+    billingSortOrder = billingSort.value === 'oldest' ? 'oldest' : 'newest';
+    render();
+  });
+  const billingSelectAll = app.querySelector('[data-billing-select-all]');
+  if (billingSelectAll) billingSelectAll.addEventListener('click', () => {
+    const propertyMap = getPropertyMap(state);
+    const visibleVisits = filterReadyToBillVisits(getReadyToBillVisits(), billingDateFilter);
+    getBillableVisitIds(visibleVisits, propertyMap).forEach((visitId) => billingSelectedVisitIds.add(visitId));
+    render();
+  });
+  const billingClearAll = app.querySelector('[data-billing-clear-all]');
+  if (billingClearAll) billingClearAll.addEventListener('click', () => {
+    billingSelectedVisitIds = new Set();
+    render();
+  });
+  const billingGenerate = app.querySelector('[data-billing-generate]');
+  if (billingGenerate) billingGenerate.addEventListener('click', () => {
+    const summary = generateSelectedVisitInvoices(state, [...billingSelectedVisitIds]);
+    billingSelectedVisitIds = new Set();
+    saveState(state);
+    flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} selected visits.`;
+    activeView = 'invoices';
+    selectedCustomerId = '';
+    showOverdueRoute = false;
+    render();
+  });
   app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(state, invoiceId, status); saveState(state); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });

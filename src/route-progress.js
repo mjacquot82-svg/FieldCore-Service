@@ -1,12 +1,4 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
+import { getRouteProgressForDate } from './data/repositories/visitReadRepository.js';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -20,21 +12,6 @@ function findRouteSection() {
 
 function getSelectedDate(section) {
   return section.querySelector('#route-date')?.value || today();
-}
-
-function calculateProgress(state, routeDate) {
-  const visits = (state.visits || []).filter(v => v.visit_date === routeDate);
-
-  const completed = visits.filter(v => v.status === 'completed').length;
-  const skipped = visits.filter(v => v.status === 'skipped').length;
-  const remaining = visits.filter(v => v.status === 'scheduled').length;
-
-  return {
-    total: visits.length,
-    completed,
-    skipped,
-    remaining
-  };
 }
 
 function renderProgressBar(progress) {
@@ -60,11 +37,8 @@ function injectProgress() {
   const existing = section.querySelector('[data-route-progress]');
   if (existing) existing.remove();
 
-  const state = loadState();
-  if (!state) return;
-
   const routeDate = getSelectedDate(section);
-  const progress = calculateProgress(state, routeDate);
+  const progress = getRouteProgressForDate(routeDate);
 
   const panel = section.querySelector('.panel');
   if (!panel) return;
