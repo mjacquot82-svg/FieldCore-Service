@@ -1,17 +1,18 @@
 import {
   computeDashboard,
   generateBatchInvoices,
-  generateSelectedVisitInvoices,
   getCustomerMap,
   getPropertyMap,
   loadState,
   resetSeed,
-  saveState,
-  updateInvoicePaymentStatus
+  saveState
 } from './lib/store.js';
 import { getSession, clearSession, renderLogin } from './role-pin-login.js';
 import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
 import { renderEmployees, bindEmployeeEvents } from './employees.js';
+import { generateInvoicesForVisits } from './services/billingService.js';
+import { updateInvoicePaymentStatus } from './services/paymentService.js';
+import { completeVisit, skipVisit, startVisit } from './services/visitLifecycleService.js';
 
 const app = document.querySelector('#app');
 let state = loadState();
@@ -374,14 +375,10 @@ function renderWorkerRoute(session) {
 }
 
 function updateWorkerVisitStatus(visitId, action) {
-  state.visits = state.visits.map((visit) => {
-    if (visit.visit_id !== visitId) return visit;
-    if (action === 'start') return { ...visit, status: 'in-progress', started_at: new Date().toISOString() };
-    if (action === 'complete') return { ...visit, status: 'completed', completed_at: new Date().toISOString() };
-    if (action === 'skip') return { ...visit, status: 'skipped', skipped_at: new Date().toISOString() };
-    return visit;
-  });
-  saveState(state);
+  if (action === 'start') startVisit(visitId, { source: 'worker-route' });
+  if (action === 'complete') completeVisit(visitId, { source: 'worker-route' });
+  if (action === 'skip') skipVisit(visitId, { source: 'worker-route' });
+  state = loadState();
 }
 
 function getReadyToBillVisits() {
@@ -671,16 +668,16 @@ function bindEvents() {
   });
   const billingGenerate = app.querySelector('[data-billing-generate]');
   if (billingGenerate) billingGenerate.addEventListener('click', () => {
-    const summary = generateSelectedVisitInvoices(state, [...billingSelectedVisitIds]);
+    const summary = generateInvoicesForVisits([...billingSelectedVisitIds], { source: 'ready-to-bill' });
     billingSelectedVisitIds = new Set();
-    saveState(state);
+    state = loadState();
     flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} selected visits.`;
     activeView = 'invoices';
     selectedCustomerId = '';
     showOverdueRoute = false;
     render();
   });
-  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(state, invoiceId, status); saveState(state); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
+  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(invoiceId, status, { source: 'payments-view' }); state = loadState(); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   if (activeView === 'route-builder') {

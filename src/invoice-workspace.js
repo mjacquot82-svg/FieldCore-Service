@@ -1,24 +1,18 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+import { listCustomers } from './data/repositories/customerRepository.js';
+import { listInvoices, listOpenInvoices } from './data/repositories/invoiceRepository.js';
+import { listProperties, listVisits } from './data/repositories/visitReadRepository.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD'
 }).format(amount || 0);
 
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
+function getCustomerMap(customers) {
+  return Object.fromEntries((customers || []).map((customer) => [customer.customer_id, customer]));
 }
 
-function getCustomerMap(state) {
-  return Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
-}
-
-function getPropertyMap(state) {
-  return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
+function getPropertyMap(properties) {
+  return Object.fromEntries((properties || []).map((property) => [property.property_id, property]));
 }
 
 function getBalance(invoice) {
@@ -42,11 +36,11 @@ function invoiceActionText(invoice) {
   return 'Review invoice status.';
 }
 
-function getInvoiceVisits(invoice, state) {
+function getInvoiceVisits(invoice, visits) {
   const visitIds = Array.isArray(invoice.visit_ids) ? invoice.visit_ids : [];
   if (!visitIds.length) return [];
   const idSet = new Set(visitIds);
-  return (state.visits || [])
+  return (visits || [])
     .filter((visit) => idSet.has(visit.visit_id))
     .sort((a, b) => String(a.visit_date || '').localeCompare(String(b.visit_date || '')));
 }
@@ -118,10 +112,10 @@ function renderServiceDetails(invoice, visits, propertyMap) {
   `;
 }
 
-function renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId) {
+function renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId) {
   const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
   const balance = getBalance(invoice);
-  const visits = getInvoiceVisits(invoice, state);
+  const invoiceVisits = getInvoiceVisits(invoice, visits);
   const isSelected = invoice.invoice_id === selectedInvoiceId;
 
   return `
@@ -134,7 +128,7 @@ function renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId) {
         <span class="badge ${getStatusClass(invoice)}">${invoice.payment_status || 'draft'}</span>
       </div>
       <div class="invoice-list-meta">
-        <span>Service: ${formatDateRange(visits, invoice)}</span>
+        <span>Service: ${formatDateRange(invoiceVisits, invoice)}</span>
         <span>Due: ${invoice.due_date || 'n/a'}</span>
       </div>
       <div class="invoice-list-totals">
@@ -145,7 +139,7 @@ function renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId) {
   `;
 }
 
-function renderInvoicePreview(invoice, customerMap, propertyMap, state) {
+function renderInvoicePreview(invoice, customerMap, propertyMap, visits) {
   if (!invoice) {
     return `
       <aside class="panel invoice-preview-panel">
@@ -158,7 +152,7 @@ function renderInvoicePreview(invoice, customerMap, propertyMap, state) {
   const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
   const balance = getBalance(invoice);
   const status = invoice.payment_status || 'draft';
-  const visits = getInvoiceVisits(invoice, state);
+  const invoiceVisits = getInvoiceVisits(invoice, visits);
 
   return `
     <aside class="panel invoice-preview-panel" data-selected-invoice="${invoice.invoice_id}">
@@ -184,7 +178,7 @@ function renderInvoicePreview(invoice, customerMap, propertyMap, state) {
         <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
       </div>
 
-      ${renderServiceDetails(invoice, visits, propertyMap)}
+      ${renderServiceDetails(invoice, invoiceVisits, propertyMap)}
 
       <div class="actions invoice-actions invoice-preview-actions">
         <button type="button" data-invoice-payment>Record payment</button>
@@ -208,13 +202,13 @@ function enhanceInvoicesView() {
   );
   if (!section || section.dataset.invoiceWorkspace === 'true') return;
 
-  const state = loadState();
-  if (!state) return;
-
-  const customerMap = getCustomerMap(state);
-  const propertyMap = getPropertyMap(state);
-  const invoices = [...(state.invoices || [])].sort((a, b) => String(b.due_date || '').localeCompare(String(a.due_date || '')));
-  const openInvoices = invoices.filter((invoice) => (invoice.payment_status || '') !== 'paid');
+  const customers = listCustomers();
+  const properties = listProperties();
+  const visits = listVisits();
+  const customerMap = getCustomerMap(customers);
+  const propertyMap = getPropertyMap(properties);
+  const invoices = listInvoices().sort((a, b) => String(b.due_date || '').localeCompare(String(a.due_date || '')));
+  const openInvoices = listOpenInvoices();
   const overdueInvoices = openInvoices.filter((invoice) => getStatusClass(invoice) === 'overdue');
   const openBalance = openInvoices.reduce((sum, invoice) => sum + Math.max(0, getBalance(invoice)), 0);
   const selectedInvoiceId = getSelectedInvoiceId(invoices);
@@ -245,38 +239,38 @@ function enhanceInvoicesView() {
           <span>${openInvoices.length} open</span>
         </div>
         <div class="invoice-list-stack">
-          ${invoices.length ? invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId)).join('') : '<p>No invoices found yet.</p>'}
+          ${invoices.length ? invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId)).join('') : '<p>No invoices found yet.</p>'}
         </div>
       </div>
-      ${renderInvoicePreview(selectedInvoice, customerMap, propertyMap, state)}
+      ${renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits)}
     </div>
   `;
 
-  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state);
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits);
 }
 
-function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customerMap, propertyMap, state) {
+function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customerMap, propertyMap, visits) {
   const list = section.querySelector('.invoice-list-stack');
   const preview = section.querySelector('.invoice-preview-panel');
   const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
 
   if (list) {
-    list.innerHTML = invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, state, selectedInvoiceId)).join('');
+    list.innerHTML = invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId)).join('');
   }
 
   if (preview) {
-    preview.outerHTML = renderInvoicePreview(selectedInvoice, customerMap, propertyMap, state);
+    preview.outerHTML = renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits);
   }
 
-  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state);
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits);
 }
 
-function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, state) {
+function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits) {
   section.querySelectorAll('[data-select-invoice]').forEach((button) => {
     if (button.dataset.bound === 'true') return;
     button.dataset.bound = 'true';
     button.addEventListener('click', () => {
-      rerenderInvoiceWorkspace(section, button.dataset.selectInvoice, invoices, customerMap, propertyMap, state);
+      rerenderInvoiceWorkspace(section, button.dataset.selectInvoice, invoices, customerMap, propertyMap, visits);
     });
   });
 

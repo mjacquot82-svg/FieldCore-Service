@@ -1,3 +1,5 @@
+import { completeVisit, skipAndRescheduleVisit as rescheduleVisit, skipVisit } from './services/visitLifecycleService.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
 
@@ -24,10 +26,6 @@ function getSession() {
 
 function isWorkerSession() {
   return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function customerMap(state) {
@@ -256,21 +254,13 @@ function refreshTodayRouteFlow() {
   enhanceTodayRoute(true);
 }
 
-function updateVisitStatus(visitId, status) {
-  const state = loadState();
-  if (!state) return;
+function completeRouteVisit(visitId) {
+  completeVisit(visitId, { source: 'today-route-flow' });
+  refreshTodayRouteFlow();
+}
 
-  state.visits = (state.visits || []).map((visit) => {
-    if (visit.visit_id !== visitId) return visit;
-    return {
-      ...visit,
-      status,
-      completed_at: status === 'completed' ? new Date().toISOString() : visit.completed_at,
-      skipped_at: status === 'skipped' ? new Date().toISOString() : visit.skipped_at
-    };
-  });
-
-  saveState(state);
+function skipRouteVisit(visitId, metadata = {}) {
+  skipVisit(visitId, { source: 'today-route-flow', ...metadata });
   refreshTodayRouteFlow();
 }
 
@@ -284,25 +274,7 @@ function skipAndRescheduleVisit(visitId) {
   const nextDate = window.prompt('Reschedule date (YYYY-MM-DD):', visit.visit_date || new Date().toISOString().slice(0, 10));
   if (!nextDate) return;
 
-  state.visits = (state.visits || []).map((item) =>
-    item.visit_id === visitId
-      ? { ...item, status: 'skipped', skipped_at: new Date().toISOString(), rescheduled_to: nextDate }
-      : item
-  );
-
-  state.visits = [
-    ...(state.visits || []),
-    {
-      ...visit,
-      visit_id: `visit_${crypto.randomUUID().slice(0, 8)}`,
-      visit_date: nextDate,
-      status: 'scheduled',
-      notes: visit.notes || 'Rescheduled visit',
-      created_at: new Date().toISOString()
-    }
-  ];
-
-  saveState(state);
+  rescheduleVisit(visitId, nextDate, { source: 'today-route-flow' });
   refreshTodayRouteFlow();
 }
 
@@ -337,8 +309,8 @@ function handleFlowClick(event) {
   const [visitId, action] = button.dataset.flowVisitAction.split(':');
   if (!visitId || !action) return;
 
-  if (action === 'complete') updateVisitStatus(visitId, 'completed');
-  if (action === 'skip') updateVisitStatus(visitId, 'skipped');
+  if (action === 'complete') completeRouteVisit(visitId);
+  if (action === 'skip') skipRouteVisit(visitId);
   if (action === 'skip-reschedule') skipAndRescheduleVisit(visitId);
 }
 

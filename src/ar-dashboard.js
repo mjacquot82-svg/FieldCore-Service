@@ -1,4 +1,7 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+import { listCustomers } from './data/repositories/customerRepository.js';
+import { listOpenInvoices } from './data/repositories/invoiceRepository.js';
+import { readState } from './data/storage/local-state-adapter.js';
+
 const SESSION_KEY = 'fieldcore_current_session_v1';
 const AR_DASHBOARD_ID = 'ar-dashboard';
 
@@ -6,14 +9,6 @@ const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD'
 }).format(amount || 0);
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
 
 function getSession() {
   try {
@@ -27,8 +22,8 @@ function isWorkerSession() {
   return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
 }
 
-function customerMap(state) {
-  return Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
+function customerMap(customers) {
+  return Object.fromEntries((customers || []).map((customer) => [customer.customer_id, customer]));
 }
 
 function todayString() {
@@ -64,10 +59,10 @@ function agingBucket(invoice, today = todayString()) {
   return '90+';
 }
 
-function getOpenInvoices(state) {
+function getOpenInvoices() {
   const today = todayString();
-  return (state.invoices || [])
-    .filter((invoice) => invoiceBalance(invoice) > 0 && (invoice.payment_status || '') !== 'paid')
+  return listOpenInvoices()
+    .filter((invoice) => invoiceBalance(invoice) > 0)
     .map((invoice) => ({ ...invoice, ar_bucket: agingBucket(invoice, today), days_overdue: invoiceAge(invoice, today), balance: invoiceBalance(invoice) }))
     .sort((a, b) => {
       const bucketWeight = { '90+': 5, '61-90': 4, '31-60': 3, '8-30': 2, '1-7': 1, current: 0 };
@@ -213,12 +208,12 @@ function renderInvoiceRiskRow(invoice, customers) {
 }
 
 function renderArDashboard() {
-  const state = loadState();
+  const state = readState();
   const main = document.querySelector('main.content');
   if (!state || !main) return;
 
-  const customers = customerMap(state);
-  const openInvoices = getOpenInvoices(state);
+  const customers = customerMap(listCustomers());
+  const openInvoices = getOpenInvoices();
   const aging = summarizeAging(openInvoices);
   const customerSummaries = summarizeCustomers(openInvoices, customers);
   const totalAr = openInvoices.reduce((sum, invoice) => sum + Number(invoice.balance || 0), 0);

@@ -1,18 +1,13 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
+import { on } from './data/appEventBus.js';
+import {
+  getCustomer,
+  listCustomers,
+  updateCustomerProfile
+} from './data/repositories/customerRepository.js';
+import { listProperties } from './data/repositories/propertyRepository.js';
+
 const DAYS = ['No preference', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const CUSTOMER_EDITOR_ID = 'customer-profile-editor';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -91,29 +86,20 @@ function enhanceCustomerCreateForm() {
   form.addEventListener('submit', () => {
     const selectedDay = normalizeDay(form.querySelector('[name="preferred_service_day"]')?.value);
     setTimeout(() => {
-      const state = loadState();
-      if (!state?.customers?.length) return;
+      const customers = listCustomers();
+      if (!customers.length) return;
 
-      const newestCustomer = [...state.customers]
+      const newestCustomer = [...customers]
         .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
       if (!newestCustomer || newestCustomer.preferred_service_day) return;
 
-      state.customers = state.customers.map((customer) =>
-        customer.customer_id === newestCustomer.customer_id
-          ? { ...customer, preferred_service_day: selectedDay }
-          : customer
-      );
-      saveState(state);
-      window.dispatchEvent(new Event('storage'));
+      updateCustomerProfile(newestCustomer.customer_id, { preferred_service_day: selectedDay });
     }, 0);
   }, true);
 }
 
 function enhanceCustomerCards() {
-  const state = loadState();
-  if (!state) return;
-
-  const customerById = Object.fromEntries((state.customers || []).map((customer) => [customer.customer_id, customer]));
+  const customerById = Object.fromEntries(listCustomers().map((customer) => [customer.customer_id, customer]));
 
   document.querySelectorAll('[data-customer-edit]').forEach((button) => {
     const customerId = button.dataset.customerEdit;
@@ -141,15 +127,14 @@ function enhanceCustomerCards() {
 }
 
 function enhanceCustomerTimelineProfile() {
-  const state = loadState();
   const heading = document.querySelector('section h2');
-  if (!state || !heading || !heading.textContent.includes('Customer Activity')) return;
+  if (!heading || !heading.textContent.includes('Customer Activity')) return;
 
   const customerName = heading.textContent.replace(' Customer Activity', '').trim();
-  const customer = (state.customers || []).find((item) => item.name === customerName);
+  const customer = listCustomers().find((item) => item.name === customerName);
   if (!customer || document.querySelector('[data-customer-profile-summary]')) return;
 
-  const properties = (state.properties || []).filter((property) => property.customer_id === customer.customer_id);
+  const properties = listProperties().filter((property) => property.customer_id === customer.customer_id);
   const preferredDay = formatPreferredDay(customer.preferred_service_day || customer.preferred_day);
   const defaultLocation = getCustomerDefaultServiceLocation(customer, properties) || 'Not set';
   const defaultFrequency = getCustomerDefaultServiceFrequency(customer, properties) || 'Not set';
@@ -173,13 +158,10 @@ function closeCustomerEditor() {
 }
 
 function openFullCustomerEditor(customerId) {
-  const state = loadState();
-  if (!state) return;
-
-  const customer = (state.customers || []).find((item) => item.customer_id === customerId);
+  const customer = getCustomer(customerId);
   if (!customer) return;
 
-  const properties = (state.properties || []).filter((property) => property.customer_id === customerId);
+  const properties = listProperties().filter((property) => property.customer_id === customerId);
   const card = document.querySelector(`[data-customer-edit="${CSS.escape(customerId)}"]`)?.closest('.customer-card');
   closeCustomerEditor();
 
@@ -230,36 +212,26 @@ function bindCustomerEditorForm() {
   editor.addEventListener('submit', (event) => {
     event.preventDefault();
 
-    const state = loadState();
-    if (!state) return;
-
     const formData = new FormData(editor);
     const customerId = editor.dataset.editingCustomerId;
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
 
-    state.customers = (state.customers || []).map((item) =>
-      item.customer_id === customerId
-        ? {
-            ...item,
-            name,
-            phone: String(formData.get('phone') || '').trim(),
-            email: String(formData.get('email') || '').trim(),
-            billing_address: String(formData.get('billing_address') || '').trim(),
-            preferred_service_day: normalizeDay(formData.get('preferred_service_day')),
-            default_service_location: String(formData.get('default_service_location') || '').trim(),
-            default_service_frequency: String(formData.get('default_service_frequency') || '').trim(),
-            customer_notes: String(formData.get('customer_notes') || '').trim(),
-            billing_notes: String(formData.get('billing_notes') || '').trim(),
-            status: String(formData.get('status') || 'active').trim() || 'active',
-            updated_at: new Date().toISOString()
-          }
-        : item
-    );
+    updateCustomerProfile(customerId, {
+      name,
+      phone: String(formData.get('phone') || '').trim(),
+      email: String(formData.get('email') || '').trim(),
+      billing_address: String(formData.get('billing_address') || '').trim(),
+      preferred_service_day: normalizeDay(formData.get('preferred_service_day')),
+      default_service_location: String(formData.get('default_service_location') || '').trim(),
+      default_service_frequency: String(formData.get('default_service_frequency') || '').trim(),
+      customer_notes: String(formData.get('customer_notes') || '').trim(),
+      billing_notes: String(formData.get('billing_notes') || '').trim(),
+      status: String(formData.get('status') || 'active').trim() || 'active',
+      updated_at: new Date().toISOString()
+    });
 
-    saveState(state);
     closeCustomerEditor();
-    window.dispatchEvent(new Event('storage'));
     document.querySelector('[data-nav="customers"]')?.click();
   });
 }
@@ -301,5 +273,5 @@ if (app) {
   observer.observe(app, { childList: true, subtree: true });
 }
 
-window.addEventListener('storage', scheduleEnhancements);
+on('customers:changed', scheduleEnhancements);
 scheduleEnhancements();
