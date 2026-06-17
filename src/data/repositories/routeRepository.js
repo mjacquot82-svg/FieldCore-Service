@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { resolveRepositoryCompanyId } from '../repositoryContext.js';
+import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -141,11 +141,12 @@ async function deleteSupabaseRoute(routeId) {
 
 export async function syncRoutesFromSupabase() {
   const state = readState();
-  const companyId = await resolveRepositoryCompanyId();
+  const context = await resolveRepositoryCompanyContext();
+  const companyId = context?.companyId;
   const routes = await readSupabaseRoutes(companyId);
   if (!routes) return null;
 
-  if (!routes.length && (state.routes || []).length) {
+  if (!routes.length && context?.membership?.role !== 'employee' && (state.routes || []).length) {
     const bootstrappedRoutes = await writeSupabaseRoutes(state.routes || []);
     if (!bootstrappedRoutes) return null;
 

@@ -89,6 +89,7 @@ export async function validateRepositoryAuthContext() {
     companyResolved,
     userId: context?.user?.id || null,
     membershipId: context?.membership?.membership_id || null,
+    employeeId: context?.membership?.employee_id || null,
     companyId: context?.companyId || null,
     role: context?.membership?.role || null,
     source: context?.source || null,

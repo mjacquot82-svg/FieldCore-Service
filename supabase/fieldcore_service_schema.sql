@@ -136,6 +136,32 @@ as $$
   limit 1
 $$;
 
+create or replace function public.current_employee_name(target_company_id text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select e.name
+  from public.company_memberships m
+  join public.employees e
+    on e.employee_id = m.employee_id
+   and e.company_id = m.company_id
+  where m.company_id = target_company_id
+    and m.user_id = auth.uid()
+    and m.status = 'active'
+    and e.status = 'active'
+  order by case m.role
+    when 'owner' then 1
+    when 'admin' then 2
+    when 'manager' then 3
+    when 'employee' then 4
+    else 5
+  end
+  limit 1
+$$;
+
 create or replace function public.company_has_any_memberships(target_company_id text)
 returns boolean
 language sql
@@ -156,6 +182,8 @@ comment on function public.has_company_role(text, text[])
   is 'Returns true when auth.uid() has an active membership in the requested company with one of the allowed roles.';
 comment on function public.current_employee_id(text)
   is 'Returns the employee_id linked to auth.uid() for the requested company, when present.';
+comment on function public.current_employee_name(text)
+  is 'Returns the active employee name linked to auth.uid() for the requested company, when present.';
 comment on function public.company_has_any_memberships(text)
   is 'Security-definer helper used by RLS bootstrap policy to test whether a company already has memberships without recursive policy evaluation.';
 
@@ -604,6 +632,176 @@ alter table public.visits
   add column if not exists holiday_conflict boolean not null default false,
   add column if not exists holiday_name text;
 
+create or replace function public.is_assigned_route(target_company_id text, target_route_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.routes r
+    where r.company_id = target_company_id
+      and r.route_id = target_route_id
+      and (
+        (
+          public.current_employee_id(target_company_id) is not null
+          and r.employee_id = public.current_employee_id(target_company_id)
+        )
+        or (
+          public.current_employee_name(target_company_id) is not null
+          and r.assigned_worker = public.current_employee_name(target_company_id)
+        )
+      )
+  )
+$$;
+
+create or replace function public.is_assigned_visit(target_company_id text, target_visit_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.visits v
+    where v.company_id = target_company_id
+      and v.visit_id = target_visit_id
+      and (
+        (
+          public.current_employee_name(target_company_id) is not null
+          and public.current_employee_name(target_company_id) in (
+            v.assigned_worker,
+            v.worker_name,
+            v.crew_name
+          )
+        )
+        or exists (
+          select 1
+          from public.routes r
+          where r.company_id = v.company_id
+            and (
+              (
+                public.current_employee_id(target_company_id) is not null
+                and r.employee_id = public.current_employee_id(target_company_id)
+              )
+              or (
+                public.current_employee_name(target_company_id) is not null
+                and r.assigned_worker = public.current_employee_name(target_company_id)
+              )
+            )
+            and (
+              r.route_id = v.route_id
+              or r.visit_ids ? v.visit_id
+            )
+        )
+      )
+  )
+$$;
+
+comment on function public.is_assigned_route(text, text)
+  is 'Returns true when auth.uid() is assigned to a route through employee_id or the current assigned_worker text workflow.';
+comment on function public.is_assigned_visit(text, text)
+  is 'Returns true when auth.uid() is assigned to a visit directly by worker text or through an assigned route.';
+
+create or replace function public.enforce_employee_visit_lifecycle_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.current_company_role(old.company_id) is distinct from 'employee' then
+    return new;
+  end if;
+
+  if not public.is_assigned_visit(old.company_id, old.visit_id) then
+    raise exception 'Employees can only update assigned visits.';
+  end if;
+
+  if new.status not in ('scheduled', 'in-progress', 'completed', 'skipped') then
+    raise exception 'Employees can only update visit lifecycle statuses.';
+  end if;
+
+  if old.visit_id is distinct from new.visit_id
+    or old.company_id is distinct from new.company_id
+    or old.property_id is distinct from new.property_id
+    or old.visit_date is distinct from new.visit_date
+    or old.service_description is distinct from new.service_description
+    or old.price is distinct from new.price
+    or old.notes is distinct from new.notes
+    or old.route_id is distinct from new.route_id
+    or old.route_name is distinct from new.route_name
+    or old.route_day is distinct from new.route_day
+    or old.assigned_worker is distinct from new.assigned_worker
+    or old.worker_name is distinct from new.worker_name
+    or old.crew_name is distinct from new.crew_name
+    or old.recurring_generated is distinct from new.recurring_generated
+    or old.holiday_conflict is distinct from new.holiday_conflict
+    or old.holiday_name is distinct from new.holiday_name
+    or old.created_at is distinct from new.created_at then
+    raise exception 'Employees can only update visit lifecycle fields.';
+  end if;
+
+  return new;
+end;
+$$;
+
+alter table public.routes enable row level security;
+alter table public.visits enable row level security;
+
+drop policy if exists "owners admins and managers can manage routes" on public.routes;
+create policy "owners admins and managers can manage routes"
+  on public.routes
+  for all
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "employees can read assigned routes" on public.routes;
+create policy "employees can read assigned routes"
+  on public.routes
+  for select
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and public.is_assigned_route(company_id, route_id)
+  );
+
+drop policy if exists "owners admins and managers can manage visits" on public.visits;
+create policy "owners admins and managers can manage visits"
+  on public.visits
+  for all
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "employees can read assigned visits" on public.visits;
+create policy "employees can read assigned visits"
+  on public.visits
+  for select
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and public.is_assigned_visit(company_id, visit_id)
+  );
+
+drop policy if exists "employees can update assigned visit lifecycle" on public.visits;
+create policy "employees can update assigned visit lifecycle"
+  on public.visits
+  for update
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and public.is_assigned_visit(company_id, visit_id)
+  )
+  with check (
+    public.current_company_role(company_id) = 'employee'
+    and public.is_assigned_visit(company_id, visit_id)
+  );
+
 create table if not exists public.route_stops (
   route_stop_id text primary key default ('rs_' || replace(gen_random_uuid()::text, '-', '')),
   company_id text not null references public.companies(company_id) on delete cascade,
@@ -806,6 +1004,10 @@ create or replace trigger set_properties_updated_at
 create or replace trigger set_visits_updated_at
   before update on public.visits
   for each row execute function public.set_updated_at();
+
+create or replace trigger enforce_employee_visit_lifecycle_update
+  before update on public.visits
+  for each row execute function public.enforce_employee_visit_lifecycle_update();
 
 create or replace trigger set_routes_updated_at
   before update on public.routes

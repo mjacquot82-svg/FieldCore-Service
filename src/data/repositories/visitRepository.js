@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { resolveRepositoryCompanyId } from '../repositoryContext.js';
+import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -149,11 +149,12 @@ async function writeSupabaseVisits(visits) {
 
 export async function syncVisitsFromSupabase() {
   const state = readState();
-  const companyId = await resolveRepositoryCompanyId();
+  const context = await resolveRepositoryCompanyContext();
+  const companyId = context?.companyId;
   const visits = await readSupabaseVisits(companyId);
   if (!visits) return null;
 
-  if (!visits.length && (state.visits || []).length) {
+  if (!visits.length && context?.membership?.role !== 'employee' && (state.visits || []).length) {
     const bootstrappedVisits = await writeSupabaseVisits(state.visits || []);
     if (!bootstrappedVisits) return null;
 
