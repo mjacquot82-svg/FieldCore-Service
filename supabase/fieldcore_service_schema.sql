@@ -32,12 +32,14 @@ create table if not exists public.company_settings (
   default_due_days integer not null default 15,
   tax_rate numeric(7, 6) not null default 0,
   payroll_week_start text not null default 'sunday',
+  admin_pin text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint company_settings_company_id_key unique (company_id),
   constraint company_settings_default_due_days_check check (default_due_days >= 0),
   constraint company_settings_tax_rate_check check (tax_rate >= 0),
-  constraint company_settings_payroll_week_start_check check (payroll_week_start in ('sunday', 'monday'))
+  constraint company_settings_payroll_week_start_check check (payroll_week_start in ('sunday', 'monday')),
+  constraint company_settings_admin_pin_check check (admin_pin is null or admin_pin ~ '^[0-9]{4}$')
 );
 
 create table if not exists public.employees (
@@ -45,13 +47,49 @@ create table if not exists public.employees (
   company_id text not null references public.companies(company_id) on delete cascade,
   name text not null,
   role text not null default 'Worker',
+  pin text,
   pin_hash text,
   status text not null default 'active',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint employees_pin_check check (pin is null or pin ~ '^[0-9]{4}$'),
   constraint employees_pin_hash_check check (pin_hash is null or length(pin_hash) >= 20),
   constraint employees_status_check check (status in ('active', 'inactive'))
 );
+
+alter table public.company_settings
+  add column if not exists admin_pin text;
+
+alter table public.employees
+  add column if not exists pin text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'company_settings_admin_pin_check'
+      and conrelid = 'public.company_settings'::regclass
+  ) then
+    alter table public.company_settings
+      add constraint company_settings_admin_pin_check check (admin_pin is null or admin_pin ~ '^[0-9]{4}$');
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'employees_pin_check'
+      and conrelid = 'public.employees'::regclass
+  ) then
+    alter table public.employees
+      add constraint employees_pin_check check (pin is null or pin ~ '^[0-9]{4}$');
+  end if;
+end;
+$$;
 
 create table if not exists public.customers (
   customer_id text primary key default ('cust_' || replace(gen_random_uuid()::text, '-', '')),

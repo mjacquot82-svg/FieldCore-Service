@@ -77,7 +77,7 @@ export function bindEmployeeEvents(render) {
   const form = document.querySelector('#employee-form');
   if (form && form.dataset.employeeBound !== 'true') {
     form.dataset.employeeBound = 'true';
-    form.addEventListener('submit', (event) => {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (form.dataset.employeeSubmitting === 'true') return;
 
@@ -92,7 +92,7 @@ export function bindEmployeeEvents(render) {
       }
 
       form.dataset.employeeSubmitting = 'true';
-      const employee = createEmployee({
+      const employee = await createEmployee({
         name,
         role,
         pin
@@ -111,12 +111,12 @@ export function bindEmployeeEvents(render) {
   document.querySelectorAll('[data-employee-toggle]').forEach((button) => {
     if (button.dataset.employeeBound === 'true') return;
     button.dataset.employeeBound = 'true';
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
 
       const employeeId = button.dataset.employeeToggle;
-      toggleEmployeeStatus(employeeId);
+      await toggleEmployeeStatus(employeeId);
       loadState();
       syncEmployeeView(render);
     });
@@ -125,7 +125,7 @@ export function bindEmployeeEvents(render) {
   document.querySelectorAll('[data-employee-pin]').forEach((button) => {
     if (button.dataset.employeeBound === 'true') return;
     button.dataset.employeeBound = 'true';
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
 
@@ -137,7 +137,7 @@ export function bindEmployeeEvents(render) {
         return;
       }
 
-      updateEmployeePin(employeeId, nextPin.trim());
+      await updateEmployeePin(employeeId, nextPin.trim());
       loadState();
       syncEmployeeView(render);
     });
@@ -146,7 +146,7 @@ export function bindEmployeeEvents(render) {
   document.querySelectorAll('[data-employee-delete]').forEach((button) => {
     if (button.dataset.employeeBound === 'true') return;
     button.dataset.employeeBound = 'true';
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
 
@@ -159,7 +159,7 @@ export function bindEmployeeEvents(render) {
 
       if (!window.confirm(`Permanently delete ${employee.name}?`)) return;
 
-      deleteEmployee(employeeId);
+      await deleteEmployee(employeeId);
       loadState();
       syncEmployeeView(render);
     });

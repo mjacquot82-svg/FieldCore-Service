@@ -31,7 +31,7 @@ export function isSupabaseConfigured() {
   return Boolean(getSupabaseConfig());
 }
 
-export async function supabaseSelect(table, params = {}) {
+async function supabaseRequest(table, { method = 'GET', params = {}, body, headers = {} } = {}) {
   const config = getSupabaseConfig();
   if (!config) return { data: null, error: null, configured: false };
 
@@ -44,20 +44,30 @@ export async function supabaseSelect(table, params = {}) {
 
   try {
     const response = await fetch(url.toString(), {
+      method,
       headers: {
         apikey: config.anonKey,
         Authorization: `Bearer ${config.anonKey}`,
-        Accept: 'application/json'
-      }
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...headers
+      },
+      ...(body
+        ? {
+            body: JSON.stringify(body)
+          }
+        : {})
     });
 
     if (!response.ok) {
       return {
         data: null,
-        error: new Error(`Supabase request failed with ${response.status}`),
+        error: new Error(`Supabase request failed with ${response.status}: ${await response.text()}`),
         configured: true
       };
     }
+
+    if (response.status === 204) return { data: null, error: null, configured: true };
 
     return {
       data: await response.json(),
@@ -67,4 +77,32 @@ export async function supabaseSelect(table, params = {}) {
   } catch (error) {
     return { data: null, error, configured: true };
   }
+}
+
+export async function supabaseSelect(table, params = {}) {
+  return supabaseRequest(table, { params });
+}
+
+export async function supabaseUpsert(table, records, { onConflict } = {}) {
+  const params = {};
+  if (onConflict) params.on_conflict = onConflict;
+
+  return supabaseRequest(table, {
+    method: 'POST',
+    params,
+    body: Array.isArray(records) ? records : [records],
+    headers: {
+      Prefer: 'resolution=merge-duplicates,return=representation'
+    }
+  });
+}
+
+export async function supabaseDelete(table, params = {}) {
+  return supabaseRequest(table, {
+    method: 'DELETE',
+    params,
+    headers: {
+      Prefer: 'return=representation'
+    }
+  });
 }

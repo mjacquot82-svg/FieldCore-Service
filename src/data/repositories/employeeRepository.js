@@ -1,6 +1,17 @@
 import { emit } from '../appEventBus.js';
+import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
+const EMPLOYEE_SELECT_FIELDS = [
+  'employee_id',
+  'company_id',
+  'name',
+  'role',
+  'pin',
+  'status',
+  'created_at',
+  'updated_at'
+].join(',');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function cloneOrNull(value) {
@@ -11,8 +22,133 @@ function makeEmployeeId() {
   return `emp_${crypto.randomUUID().slice(0, 8)}`;
 }
 
+function localEmployees() {
+  return readState().employees || [];
+}
+
+function writeLocalEmployees(employees, metadata = {}) {
+  const state = readState();
+  const nextState = {
+    ...state,
+    employees
+  };
+
+  writeState(nextState, metadata);
+  return employees;
+}
+
+async function ensureSupabaseCompany(state) {
+  const company = state.company;
+  if (!company?.company_id) return false;
+
+  const response = await supabaseUpsert(
+    'companies',
+    {
+      company_id: company.company_id,
+      name: company.name || 'FieldCore',
+      status: company.status || 'active',
+      created_at: company.created_at
+    },
+    { onConflict: 'company_id' }
+  );
+
+  return response.configured && !response.error;
+}
+
+function normalizeEmployeeForSupabase(employee) {
+  return {
+    employee_id: employee.employee_id,
+    company_id: employee.company_id,
+    name: employee.name || '',
+    role: employee.role || 'Worker',
+    pin: employee.pin || '',
+    status: employee.status || 'active',
+    created_at: employee.created_at
+  };
+}
+
+async function readSupabaseEmployees(companyId) {
+  if (!companyId) return null;
+
+  const response = await supabaseSelect('employees', {
+    select: EMPLOYEE_SELECT_FIELDS,
+    company_id: `eq.${companyId}`,
+    order: 'name.asc'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+async function writeSupabaseEmployee(employee) {
+  const state = readState();
+  const record = normalizeEmployeeForSupabase(employee);
+  if (!record.employee_id || !record.company_id) return null;
+
+  const companyReady = await ensureSupabaseCompany(state);
+  if (!companyReady) return null;
+
+  const response = await supabaseUpsert('employees', record, {
+    onConflict: 'employee_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
+}
+
+async function writeSupabaseEmployees(employees) {
+  const state = readState();
+  const records = employees.map(normalizeEmployeeForSupabase).filter((employee) => (
+    employee.employee_id && employee.company_id
+  ));
+  if (!records.length) return null;
+
+  const companyReady = await ensureSupabaseCompany(state);
+  if (!companyReady) return null;
+
+  const response = await supabaseUpsert('employees', records, {
+    onConflict: 'employee_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+async function deleteSupabaseEmployee(employeeId) {
+  const response = await supabaseDelete('employees', {
+    employee_id: `eq.${employeeId}`
+  });
+
+  if (!response.configured) return null;
+  if (response.error) return null;
+  return true;
+}
+
+export async function syncEmployeesFromSupabase() {
+  const state = readState();
+  const employees = await readSupabaseEmployees(state.company?.company_id);
+  if (!employees) return null;
+
+  if (!employees.length && (state.employees || []).length) {
+    const bootstrappedEmployees = await writeSupabaseEmployees(state.employees || []);
+    if (!bootstrappedEmployees) return null;
+
+    writeLocalEmployees(bootstrappedEmployees, {
+      action: 'employees:bootstrap-supabase'
+    });
+
+    return clone(bootstrappedEmployees);
+  }
+
+  writeLocalEmployees(employees, {
+    action: 'employees:sync-from-supabase'
+  });
+
+  return clone(employees);
+}
+
 export function listEmployees() {
-  return clone(readState().employees || []);
+  return clone(localEmployees());
 }
 
 export function listActiveEmployees() {
@@ -20,11 +156,11 @@ export function listActiveEmployees() {
 }
 
 export function getEmployee(employeeId) {
-  const employee = (readState().employees || []).find((item) => item.employee_id === employeeId);
+  const employee = localEmployees().find((item) => item.employee_id === employeeId);
   return cloneOrNull(employee);
 }
 
-export function createEmployee(employeeInput = {}) {
+export async function createEmployee(employeeInput = {}) {
   const state = readState();
   const employee = {
     employee_id: employeeInput.employee_id || makeEmployeeId(),
@@ -39,77 +175,79 @@ export function createEmployee(employeeInput = {}) {
   const employees = state.employees || [];
   if (employees.some((item) => item.employee_id === employee.employee_id)) return null;
 
-  const nextState = {
-    ...state,
-    employees: [...employees, employee]
-  };
+  const persistedEmployee = (await writeSupabaseEmployee(employee)) || employee;
+  const nextEmployees = [...employees, persistedEmployee];
 
-  writeState(nextState, {
+  writeLocalEmployees(nextEmployees, {
     action: 'employee:create',
-    employee_id: employee.employee_id
+    employee_id: persistedEmployee.employee_id
   });
 
   emit('employees:changed', {
     action: 'create',
-    employee_id: employee.employee_id,
-    employee: clone(employee)
+    employee_id: persistedEmployee.employee_id,
+    employee: clone(persistedEmployee)
   });
 
-  return clone(employee);
+  return clone(persistedEmployee);
 }
 
-export function toggleEmployeeStatus(employeeId) {
+export async function toggleEmployeeStatus(employeeId) {
   const state = readState();
   let updatedEmployee = null;
 
-  const nextState = {
-    ...state,
-    employees: (state.employees || []).map((employee) => {
-      if (employee.employee_id !== employeeId) return employee;
-      updatedEmployee = {
-        ...employee,
-        status: employee.status === 'active' ? 'inactive' : 'active'
-      };
-      return updatedEmployee;
-    })
-  };
+  const employees = state.employees || [];
+  const nextEmployees = employees.map((employee) => {
+    if (employee.employee_id !== employeeId) return employee;
+    updatedEmployee = {
+      ...employee,
+      status: employee.status === 'active' ? 'inactive' : 'active'
+    };
+    return updatedEmployee;
+  });
 
   if (!updatedEmployee) return null;
+  const persistedEmployee = (await writeSupabaseEmployee(updatedEmployee)) || updatedEmployee;
+  const persistedEmployees = nextEmployees.map((employee) => (
+    employee.employee_id === employeeId ? persistedEmployee : employee
+  ));
 
-  writeState(nextState, {
+  writeLocalEmployees(persistedEmployees, {
     action: 'employee:toggle-status',
     employee_id: employeeId,
-    status: updatedEmployee.status
+    status: persistedEmployee.status
   });
 
   emit('employees:changed', {
     action: 'toggle-status',
     employee_id: employeeId,
-    employee: clone(updatedEmployee)
+    employee: clone(persistedEmployee)
   });
 
-  return clone(updatedEmployee);
+  return clone(persistedEmployee);
 }
 
-export function updateEmployeePin(employeeId, pin) {
+export async function updateEmployeePin(employeeId, pin) {
   const state = readState();
   let updatedEmployee = null;
 
-  const nextState = {
-    ...state,
-    employees: (state.employees || []).map((employee) => {
-      if (employee.employee_id !== employeeId) return employee;
-      updatedEmployee = {
-        ...employee,
-        pin
-      };
-      return updatedEmployee;
-    })
-  };
+  const employees = state.employees || [];
+  const nextEmployees = employees.map((employee) => {
+    if (employee.employee_id !== employeeId) return employee;
+    updatedEmployee = {
+      ...employee,
+      pin
+    };
+    return updatedEmployee;
+  });
 
   if (!updatedEmployee) return null;
+  const persistedEmployee = (await writeSupabaseEmployee(updatedEmployee)) || updatedEmployee;
+  const persistedEmployees = nextEmployees.map((employee) => (
+    employee.employee_id === employeeId ? persistedEmployee : employee
+  ));
 
-  writeState(nextState, {
+  writeLocalEmployees(persistedEmployees, {
     action: 'employee:update-pin',
     employee_id: employeeId
   });
@@ -117,23 +255,20 @@ export function updateEmployeePin(employeeId, pin) {
   emit('employees:changed', {
     action: 'update-pin',
     employee_id: employeeId,
-    employee: clone(updatedEmployee)
+    employee: clone(persistedEmployee)
   });
 
-  return clone(updatedEmployee);
+  return clone(persistedEmployee);
 }
 
-export function deleteEmployee(employeeId) {
+export async function deleteEmployee(employeeId) {
   const state = readState();
   const employee = (state.employees || []).find((item) => item.employee_id === employeeId);
   if (!employee) return null;
 
-  const nextState = {
-    ...state,
-    employees: (state.employees || []).filter((item) => item.employee_id !== employeeId)
-  };
+  await deleteSupabaseEmployee(employeeId);
 
-  writeState(nextState, {
+  writeLocalEmployees((state.employees || []).filter((item) => item.employee_id !== employeeId), {
     action: 'employee:delete',
     employee_id: employeeId
   });

@@ -155,10 +155,10 @@ function ensurePayrollSettingsButton() {
   `);
 
   panel.querySelectorAll('[data-set-payroll-week]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const nextState = loadState();
       if (!nextState) return;
-      updatePayrollWeekStart(button.dataset.setPayrollWeek);
+      await updatePayrollWeekStart(button.dataset.setPayrollWeek);
       window.alert(`Payroll week now starts on ${button.dataset.setPayrollWeek}.`);
       window.location.reload();
     });

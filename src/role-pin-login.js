@@ -36,19 +36,19 @@ export function getAdminPin(state) {
   return state?.settings?.admin_pin || getAdminPinRecord() || DEFAULT_ADMIN_PIN;
 }
 
-export function ensureDefaultAdminPin(state) {
+export async function ensureDefaultAdminPin(state) {
   if (!state) return;
   if (state.settings?.admin_pin) return;
-  ensureDefaultAdminPinRecord();
+  await ensureDefaultAdminPinRecord();
 }
 
 export function activeEmployees(state) {
   return state ? (state.employees || []).filter((employee) => employee.status === 'active') : listActiveEmployees();
 }
 
-function loginCard() {
+async function loginCard() {
   const state = loadState();
-  ensureDefaultAdminPin(state);
+  await ensureDefaultAdminPin(state);
   const employees = activeEmployees(state);
 
   return `
@@ -87,8 +87,10 @@ function loginCard() {
 export function renderLogin() {
   const app = document.querySelector('#app');
   if (!app) return;
-  app.innerHTML = loginCard();
-  bindLoginEvents();
+  loginCard().then((html) => {
+    app.innerHTML = html;
+    bindLoginEvents();
+  });
 }
 
 export function bindLoginEvents() {

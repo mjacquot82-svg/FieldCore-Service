@@ -32,6 +32,7 @@ import {
   scheduleOneOffVisit,
   scheduleVisit
 } from './data/repositories/visitRepository.js';
+import { syncFoundationFromSupabase } from './data/supabaseFoundation.js';
 
 const app = document.querySelector('#app');
 let state = loadState();
@@ -732,5 +733,16 @@ function bindEvents() {
   app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
 }
 
+async function initializeApp() {
+  try {
+    await syncFoundationFromSupabase();
+  } catch {
+    // Local storage remains the fallback source of truth if remote sync fails unexpectedly.
+  }
+  state = loadState();
+  currentSession = getSession();
+  render();
+}
+
 if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
-render();
+initializeApp();
