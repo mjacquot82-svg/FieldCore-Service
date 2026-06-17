@@ -1,3 +1,5 @@
+import { updatePayrollWeekStart } from './data/repositories/settingsRepository.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
 
@@ -7,10 +9,6 @@ function loadState() {
   } catch {
     return null;
   }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function getSession() {
@@ -160,8 +158,7 @@ function ensurePayrollSettingsButton() {
     button.addEventListener('click', () => {
       const nextState = loadState();
       if (!nextState) return;
-      nextState.settings = { ...(nextState.settings || {}), payroll_week_start: button.dataset.setPayrollWeek };
-      saveState(nextState);
+      updatePayrollWeekStart(button.dataset.setPayrollWeek);
       window.alert(`Payroll week now starts on ${button.dataset.setPayrollWeek}.`);
       window.location.reload();
     });

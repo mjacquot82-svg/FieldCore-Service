@@ -1,3 +1,9 @@
+import { listActiveEmployees } from './data/repositories/employeeRepository.js';
+import {
+  ensureDefaultAdminPin as ensureDefaultAdminPinRecord,
+  getAdminPin as getAdminPinRecord
+} from './data/repositories/settingsRepository.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
 const DEFAULT_ADMIN_PIN = '0000';
@@ -8,10 +14,6 @@ function loadState() {
   } catch {
     return null;
   }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 export function getSession() {
@@ -31,18 +33,17 @@ export function clearSession() {
 }
 
 export function getAdminPin(state) {
-  return state?.settings?.admin_pin || DEFAULT_ADMIN_PIN;
+  return state?.settings?.admin_pin || getAdminPinRecord() || DEFAULT_ADMIN_PIN;
 }
 
 export function ensureDefaultAdminPin(state) {
   if (!state) return;
   if (state.settings?.admin_pin) return;
-  state.settings = { ...(state.settings || {}), admin_pin: DEFAULT_ADMIN_PIN };
-  saveState(state);
+  ensureDefaultAdminPinRecord();
 }
 
 export function activeEmployees(state) {
-  return (state?.employees || []).filter((employee) => employee.status === 'active');
+  return state ? (state.employees || []).filter((employee) => employee.status === 'active') : listActiveEmployees();
 }
 
 function loginCard() {

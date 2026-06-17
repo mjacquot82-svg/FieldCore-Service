@@ -1,8 +1,11 @@
-import { loadState, saveState } from './lib/store.js';
-
-function makeEmployeeId() {
-  return `emp_${crypto.randomUUID().slice(0, 8)}`;
-}
+import { loadState } from './lib/store.js';
+import {
+  createEmployee,
+  deleteEmployee,
+  listEmployees,
+  toggleEmployeeStatus,
+  updateEmployeePin
+} from './data/repositories/employeeRepository.js';
 
 function syncEmployeeView(render) {
   if (typeof render === 'function') {
@@ -40,7 +43,7 @@ export function renderEmployees() {
   const state = loadState();
   if (!state) return '<section><p>Employees data not available.</p></section>';
 
-  const employees = state.employees || [];
+  const employees = listEmployees();
 
   return `
     <section>
@@ -78,9 +81,6 @@ export function bindEmployeeEvents(render) {
       event.preventDefault();
       if (form.dataset.employeeSubmitting === 'true') return;
 
-      const state = loadState();
-      if (!state) return;
-
       const formData = new FormData(form);
       const name = String(formData.get('name') || '').trim();
       const role = String(formData.get('role') || 'Worker').trim() || 'Worker';
@@ -92,24 +92,16 @@ export function bindEmployeeEvents(render) {
       }
 
       form.dataset.employeeSubmitting = 'true';
-      const employee = {
-        employee_id: makeEmployeeId(),
-        company_id: state.company?.company_id,
+      const employee = createEmployee({
         name,
         role,
-        pin,
-        status: 'active',
-        created_at: new Date().toISOString()
-      };
-
-      const employees = state.employees || [];
-      if (employees.some((item) => item.employee_id === employee.employee_id)) {
+        pin
+      });
+      if (!employee) {
         form.dataset.employeeSubmitting = 'false';
         return;
       }
 
-      state.employees = [...employees, employee];
-      saveState(state);
       loadState();
       form.reset();
       syncEmployeeView(render);
@@ -124,13 +116,7 @@ export function bindEmployeeEvents(render) {
       if (!state) return;
 
       const employeeId = button.dataset.employeeToggle;
-      state.employees = (state.employees || []).map((employee) =>
-        employee.employee_id === employeeId
-          ? { ...employee, status: employee.status === 'active' ? 'inactive' : 'active' }
-          : employee
-      );
-
-      saveState(state);
+      toggleEmployeeStatus(employeeId);
       loadState();
       syncEmployeeView(render);
     });
@@ -151,11 +137,7 @@ export function bindEmployeeEvents(render) {
         return;
       }
 
-      state.employees = (state.employees || []).map((employee) =>
-        employee.employee_id === employeeId ? { ...employee, pin: nextPin.trim() } : employee
-      );
-
-      saveState(state);
+      updateEmployeePin(employeeId, nextPin.trim());
       loadState();
       syncEmployeeView(render);
     });
@@ -177,8 +159,7 @@ export function bindEmployeeEvents(render) {
 
       if (!window.confirm(`Permanently delete ${employee.name}?`)) return;
 
-      state.employees = (state.employees || []).filter((item) => item.employee_id !== employeeId);
-      saveState(state);
+      deleteEmployee(employeeId);
       loadState();
       syncEmployeeView(render);
     });
