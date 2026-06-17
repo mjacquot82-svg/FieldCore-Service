@@ -1,6 +1,6 @@
 -- FieldCore Service production schema for Supabase.
 -- Paste this file into the Supabase SQL Editor and run it as one script.
--- RLS policies are intentionally omitted.
+-- RLS policies are intentionally limited to foundation tables in this phase.
 
 begin;
 
@@ -71,6 +71,151 @@ create table if not exists public.company_memberships (
   constraint company_memberships_role_check check (role in ('owner', 'admin', 'manager', 'employee')),
   constraint company_memberships_status_check check (status in ('active', 'inactive'))
 );
+
+-- RLS helper functions intentionally read company_memberships through
+-- security definer execution so policies do not recurse on the membership table.
+create or replace function public.current_company_role(target_company_id text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select m.role
+  from public.company_memberships m
+  where m.company_id = target_company_id
+    and m.user_id = auth.uid()
+    and m.status = 'active'
+  order by case m.role
+    when 'owner' then 1
+    when 'admin' then 2
+    when 'manager' then 3
+    when 'employee' then 4
+    else 5
+  end
+  limit 1
+$$;
+
+create or replace function public.has_company_role(target_company_id text, allowed_roles text[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.company_memberships m
+    where m.company_id = target_company_id
+      and m.user_id = auth.uid()
+      and m.status = 'active'
+      and m.role = any(allowed_roles)
+  )
+$$;
+
+create or replace function public.current_employee_id(target_company_id text)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select m.employee_id
+  from public.company_memberships m
+  where m.company_id = target_company_id
+    and m.user_id = auth.uid()
+    and m.status = 'active'
+  order by case m.role
+    when 'owner' then 1
+    when 'admin' then 2
+    when 'manager' then 3
+    when 'employee' then 4
+    else 5
+  end
+  limit 1
+$$;
+
+create or replace function public.company_has_any_memberships(target_company_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.company_memberships m
+    where m.company_id = target_company_id
+  )
+$$;
+
+comment on function public.current_company_role(text)
+  is 'Returns the active company_memberships role for auth.uid() within the requested company.';
+comment on function public.has_company_role(text, text[])
+  is 'Returns true when auth.uid() has an active membership in the requested company with one of the allowed roles.';
+comment on function public.current_employee_id(text)
+  is 'Returns the employee_id linked to auth.uid() for the requested company, when present.';
+comment on function public.company_has_any_memberships(text)
+  is 'Security-definer helper used by RLS bootstrap policy to test whether a company already has memberships without recursive policy evaluation.';
+
+alter table public.companies enable row level security;
+alter table public.company_memberships enable row level security;
+
+drop policy if exists "members can read their company" on public.companies;
+create policy "members can read their company"
+  on public.companies
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager', 'employee']));
+
+drop policy if exists "authenticated users can create companies" on public.companies;
+create policy "authenticated users can create companies"
+  on public.companies
+  for insert
+  to authenticated
+  with check (auth.uid() is not null);
+
+drop policy if exists "owners and admins can update their company" on public.companies;
+create policy "owners and admins can update their company"
+  on public.companies
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']))
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "users can read their own active membership" on public.company_memberships;
+create policy "users can read their own active membership"
+  on public.company_memberships
+  for select
+  to authenticated
+  using (user_id = auth.uid() and status = 'active');
+
+drop policy if exists "owners and admins can read company memberships" on public.company_memberships;
+create policy "owners and admins can read company memberships"
+  on public.company_memberships
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "authenticated users can create initial owner membership" on public.company_memberships;
+create policy "authenticated users can create initial owner membership"
+  on public.company_memberships
+  for insert
+  to authenticated
+  with check (
+    user_id = auth.uid()
+    and role = 'owner'
+    and status = 'active'
+    and not public.company_has_any_memberships(company_id)
+  );
+
+drop policy if exists "owners can manage company memberships" on public.company_memberships;
+create policy "owners can manage company memberships"
+  on public.company_memberships
+  for all
+  to authenticated
+  using (public.has_company_role(company_id, array['owner']))
+  with check (public.has_company_role(company_id, array['owner']));
 
 alter table public.company_settings
   add column if not exists admin_pin text;

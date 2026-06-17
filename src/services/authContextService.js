@@ -15,6 +15,24 @@ export async function getAuthMembershipDiagnostics() {
   return validateRepositoryAuthContext();
 }
 
+export async function getRlsFoundationPreflight() {
+  const diagnostics = await validateRepositoryAuthContext();
+  const checks = {
+    authenticatedUser: diagnostics.authenticated,
+    authenticatedTransport: diagnostics.transportAuthenticated,
+    activeMembership: diagnostics.membershipActive,
+    membershipLinkedToUser: diagnostics.membershipUserLinked,
+    companyResolved: diagnostics.companyResolved,
+    roleResolved: Boolean(diagnostics.role)
+  };
+
+  return {
+    ready: Object.values(checks).every(Boolean),
+    checks,
+    diagnostics
+  };
+}
+
 export async function attachCurrentUserToOwnerMembership(metadata = {}) {
   const user = await getAuthenticatedUser();
   if (!user?.id) return null;

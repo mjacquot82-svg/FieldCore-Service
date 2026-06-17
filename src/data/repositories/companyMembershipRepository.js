@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { getAuthenticatedUser } from '../supabaseAuth.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -142,6 +143,43 @@ async function writeSupabaseMemberships(memberships) {
   return clone(response.data);
 }
 
+function linkBootstrapOwnerMembership(memberships, userId) {
+  if (!userId) return memberships;
+
+  return memberships.map((membership) => (
+    membership.role === 'owner' && membership.status === 'active' && !membership.user_id
+      ? {
+          ...membership,
+          user_id: userId
+        }
+      : membership
+  ));
+}
+
+async function writeBootstrapMemberships(memberships) {
+  const user = await getAuthenticatedUser();
+  const linkedMemberships = linkBootstrapOwnerMembership(memberships, user?.id);
+  const ownerMembership = linkedMemberships.find((membership) =>
+    membership.role === 'owner' &&
+    membership.status === 'active' &&
+    membership.user_id === user?.id
+  );
+
+  if (!ownerMembership) return writeSupabaseMemberships(linkedMemberships);
+
+  const persistedOwnerMembership = await writeSupabaseMembership(ownerMembership);
+  if (!persistedOwnerMembership) return null;
+
+  const remainingMemberships = linkedMemberships.filter((membership) =>
+    membership.membership_id !== persistedOwnerMembership.membership_id
+  );
+  if (!remainingMemberships.length) return [persistedOwnerMembership];
+
+  const persistedRemainingMemberships = await writeSupabaseMemberships(remainingMemberships);
+  if (!persistedRemainingMemberships) return [persistedOwnerMembership];
+  return [persistedOwnerMembership, ...persistedRemainingMemberships];
+}
+
 export async function syncCompanyMembershipsFromSupabase() {
   const state = readState();
   const memberships = await readSupabaseMemberships(state.company?.company_id);
@@ -152,7 +190,7 @@ export async function syncCompanyMembershipsFromSupabase() {
     const bootstrapMemberships = local.length
       ? local
       : [makeDefaultOwnerMembership(state.company)].filter(Boolean);
-    const bootstrappedMemberships = await writeSupabaseMemberships(bootstrapMemberships);
+    const bootstrappedMemberships = await writeBootstrapMemberships(bootstrapMemberships);
     if (!bootstrappedMemberships) return null;
 
     writeLocalMemberships(bootstrappedMemberships, {
