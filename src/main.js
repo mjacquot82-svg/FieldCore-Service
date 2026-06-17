@@ -1,16 +1,17 @@
 import {
   computeDashboard,
-  generateBatchInvoices,
   getCustomerMap,
   getPropertyMap,
   loadState,
-  resetSeed,
-  saveState
+  resetSeed
 } from './lib/store.js';
 import { getSession, clearSession, renderLogin } from './role-pin-login.js';
 import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
 import { renderEmployees, bindEmployeeEvents } from './employees.js';
-import { generateInvoicesForVisits } from './services/billingService.js';
+import {
+  generateInvoicesForDateRange,
+  generateInvoicesForVisits
+} from './services/billingService.js';
 import { deactivateCustomerAndProperties } from './services/customerService.js';
 import { updateInvoicePaymentStatus } from './services/paymentService.js';
 import { completeVisit, skipVisit, startVisit } from './services/visitLifecycleService.js';
@@ -660,7 +661,7 @@ function bindEvents() {
   app.querySelectorAll('[data-service-edit]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceEdit; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const serviceType = window.prompt('Service type:', property.service_type); if (!serviceType) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; const notes = window.prompt('Notes:', property.notes || ''); if (notes === null) return; const status = window.prompt('Status (active or inactive):', property.status || 'active'); if (!status) return; updateProperty(propertyId, { service_type: serviceType, recurring_frequency: frequency, default_price: Number(price || 0), notes, status }); state = loadState(); flashMessage = 'Service updated.'; render(); }));
   app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; removePropertyService(propertyId); state = loadState(); flashMessage = 'Service removed from active work.'; render(); }));
   const batchForm = app.querySelector('#batch-form');
-  if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateBatchInvoices(state, formData.get('start'), formData.get('end')); saveState(state); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
+  if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateInvoicesForDateRange(formData.get('start'), formData.get('end'), { source: 'batch-form' }); state = loadState(); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
   app.querySelectorAll('[data-billing-visit]').forEach((checkbox) => checkbox.addEventListener('change', () => {
     if (checkbox.checked) billingSelectedVisitIds.add(checkbox.dataset.billingVisit);
     else billingSelectedVisitIds.delete(checkbox.dataset.billingVisit);
@@ -702,7 +703,7 @@ function bindEvents() {
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   if (activeView === 'route-builder') {
-    bindRouteBuilderEvents(state, saveState, (date) => { selectedRouteBuilderDate = date; }, render);
+    bindRouteBuilderEvents(state, (date) => { selectedRouteBuilderDate = date; }, render);
   }
   if (activeView === 'employees') {
     bindEmployeeEvents(reloadStateAndRender);

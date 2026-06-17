@@ -193,7 +193,7 @@ export function renderRouteBuilder(state, date = today()) {
   `;
 }
 
-export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, render) {
+export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
   const dateInput = document.querySelector('#route-builder-date');
   if (dateInput) {
     dateInput.addEventListener('change', () => {

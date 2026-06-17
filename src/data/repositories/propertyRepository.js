@@ -160,6 +160,17 @@ export function updatePropertyPrice(propertyId, defaultPrice) {
   );
 }
 
+export function updateRecurringSchedule(propertyId, recurringSchedule) {
+  return updateProperty(
+    propertyId,
+    { recurring_schedule: recurringSchedule },
+    {
+      action: 'property:update-recurring-schedule',
+      eventAction: 'update-recurring-schedule'
+    }
+  );
+}
+
 export function pausePropertyService(propertyId) {
   return deactivateProperty(propertyId, {
     action: 'property:pause-service',

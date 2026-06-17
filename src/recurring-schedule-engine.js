@@ -1,4 +1,7 @@
-import { bulkCreateVisits } from './data/repositories/visitRepository.js';
+import {
+  createRecurringGeneratedVisits,
+  saveRecurringSchedule
+} from './services/scheduleService.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const GENERATE_DAYS = 30;
@@ -32,10 +35,6 @@ function loadState() {
   } catch {
     return null;
   }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function today() {
@@ -135,23 +134,14 @@ function editRecurringSchedule(propertyId) {
     return;
   }
 
-  state.properties = (state.properties || []).map((item) =>
-    item.property_id === propertyId
-      ? {
-          ...item,
-          recurring_schedule: {
-            frequency: normalizedFrequency,
-            weekday: weekdayNumber,
-            start_date: startDate.trim(),
-            end_date: endDate.trim(),
-            holiday_policy: 'flag_only',
-            status: 'active'
-          }
-        }
-      : item
-  );
-
-  saveState(state);
+  saveRecurringSchedule(propertyId, {
+    frequency: normalizedFrequency,
+    weekday: weekdayNumber,
+    start_date: startDate.trim(),
+    end_date: endDate.trim(),
+    holiday_policy: 'flag_only',
+    status: 'active'
+  });
   window.alert('Recurring schedule saved.');
   window.location.reload();
 }
@@ -242,10 +232,7 @@ function generateUpcomingVisits(propertyId) {
       };
     });
 
-  bulkCreateVisits(newVisits, {
-    action: 'visit:create-recurring-generated',
-    eventAction: 'recurring-generated'
-  });
+  createRecurringGeneratedVisits(newVisits);
   window.alert(`Generated ${createdCount} upcoming visit${createdCount === 1 ? '' : 's'} for the next ${GENERATE_DAYS} days.`);
   window.location.reload();
 }

@@ -110,3 +110,23 @@ export function generateInvoicesForVisits(visitIds, metadata = {}) {
 
   return summary;
 }
+
+export function generateInvoicesForDateRange(startDate, endDate, metadata = {}) {
+  const properties = listProperties();
+  const visits = listVisits();
+  const propertyMap = getPropertyMap(properties);
+  const visitIds = visits
+    .filter((visit) => {
+      if (visit.status !== 'completed') return false;
+      if (visit.visit_date < startDate || visit.visit_date > endDate) return false;
+      const property = propertyMap[visit.property_id];
+      return Boolean(property?.customer_id);
+    })
+    .map((visit) => visit.visit_id);
+
+  return generateInvoicesForVisits(visitIds, {
+    ...metadata,
+    action: metadata.action || 'billing:create-date-range-invoices',
+    eventAction: metadata.eventAction || 'billing-create-date-range-invoices'
+  });
+}
