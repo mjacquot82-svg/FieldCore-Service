@@ -85,7 +85,7 @@ function enhanceCustomerCreateForm() {
 
   form.addEventListener('submit', () => {
     const selectedDay = normalizeDay(form.querySelector('[name="preferred_service_day"]')?.value);
-    setTimeout(() => {
+    setTimeout(async () => {
       const customers = listCustomers();
       if (!customers.length) return;
 
@@ -93,7 +93,7 @@ function enhanceCustomerCreateForm() {
         .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
       if (!newestCustomer || newestCustomer.preferred_service_day) return;
 
-      updateCustomerProfile(newestCustomer.customer_id, { preferred_service_day: selectedDay });
+      await updateCustomerProfile(newestCustomer.customer_id, { preferred_service_day: selectedDay });
     }, 0);
   }, true);
 }
@@ -209,7 +209,7 @@ function bindCustomerEditorForm() {
     button.addEventListener('click', closeCustomerEditor);
   });
 
-  editor.addEventListener('submit', (event) => {
+  editor.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     const formData = new FormData(editor);
@@ -217,7 +217,7 @@ function bindCustomerEditorForm() {
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
 
-    updateCustomerProfile(customerId, {
+    await updateCustomerProfile(customerId, {
       name,
       phone: String(formData.get('phone') || '').trim(),
       email: String(formData.get('email') || '').trim(),

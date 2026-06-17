@@ -93,7 +93,7 @@ function addAccessEditButtonsToPropertyCards() {
   });
 }
 
-function editAccessInfo(propertyId) {
+async function editAccessInfo(propertyId) {
   const property = getProperty(propertyId);
   if (!property) return;
 
@@ -109,7 +109,7 @@ function editAccessInfo(propertyId) {
   const hazards = window.prompt('Hazards / warnings:', property.hazards || '');
   if (hazards === null) return;
 
-  updateAccessInfo(propertyId, {
+  await updateAccessInfo(propertyId, {
     gate_code: gateCode.trim(),
     access_notes: accessNotes.trim(),
     parking_notes: parkingNotes.trim(),

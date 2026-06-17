@@ -143,6 +143,7 @@ create table if not exists public.properties (
   access_notes text,
   parking_notes text,
   hazards text,
+  recurring_schedule jsonb,
   status text not null default 'active',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -152,6 +153,9 @@ create table if not exists public.properties (
     recurring_frequency in ('one-time', 'weekly', 'biweekly', 'monthly')
   )
 );
+
+alter table public.properties
+  add column if not exists recurring_schedule jsonb;
 
 create table if not exists public.routes (
   route_id text primary key default ('route_' || replace(gen_random_uuid()::text, '-', '')),

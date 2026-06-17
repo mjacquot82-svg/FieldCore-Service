@@ -94,7 +94,7 @@ function addRecurringButtons() {
   });
 }
 
-function editRecurringSchedule(propertyId) {
+async function editRecurringSchedule(propertyId) {
   const state = loadState();
   if (!state) return;
 
@@ -134,7 +134,7 @@ function editRecurringSchedule(propertyId) {
     return;
   }
 
-  saveRecurringSchedule(propertyId, {
+  await saveRecurringSchedule(propertyId, {
     frequency: normalizedFrequency,
     weekday: weekdayNumber,
     start_date: startDate.trim(),
@@ -194,7 +194,7 @@ function generateDates(schedule) {
   return dates;
 }
 
-function generateUpcomingVisits(propertyId) {
+async function generateUpcomingVisits(propertyId) {
   const state = loadState();
   if (!state) return;
 
@@ -232,7 +232,7 @@ function generateUpcomingVisits(propertyId) {
       };
     });
 
-  createRecurringGeneratedVisits(newVisits);
+  await createRecurringGeneratedVisits(newVisits);
   window.alert(`Generated ${createdCount} upcoming visit${createdCount === 1 ? '' : 's'} for the next ${GENERATE_DAYS} days.`);
   window.location.reload();
 }

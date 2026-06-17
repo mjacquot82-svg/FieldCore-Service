@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { supabaseSelect } from '../supabaseClient.js';
+import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
 const PROFILE_FIELDS = [
@@ -22,7 +22,7 @@ const BILLING_FIELDS = [
   'updated_at'
 ];
 
-const CUSTOMER_SELECT_FIELDS = [
+const CUSTOMER_FIELDS = [
   'customer_id',
   'company_id',
   'name',
@@ -38,8 +38,9 @@ const CUSTOMER_SELECT_FIELDS = [
   'status',
   'created_at',
   'updated_at'
-].join(',');
+];
 
+const CUSTOMER_SELECT_FIELDS = CUSTOMER_FIELDS.join(',');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function cloneOrNull(value) {
@@ -48,6 +49,39 @@ function cloneOrNull(value) {
 
 function makeCustomerId() {
   return `cust_${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function localCustomers() {
+  return readState().customers || [];
+}
+
+function writeLocalCustomers(customers, metadata = {}) {
+  const state = readState();
+  const nextState = {
+    ...state,
+    customers
+  };
+
+  writeState(nextState, metadata);
+  return customers;
+}
+
+async function ensureSupabaseCompany(state) {
+  const company = state.company;
+  if (!company?.company_id) return false;
+
+  const response = await supabaseUpsert(
+    'companies',
+    {
+      company_id: company.company_id,
+      name: company.name || 'FieldCore',
+      status: company.status || 'active',
+      created_at: company.created_at
+    },
+    { onConflict: 'company_id' }
+  );
+
+  return response.configured && !response.error;
 }
 
 function pickAllowedFields(patch, allowedFields) {
@@ -59,7 +93,126 @@ function pickAllowedFields(patch, allowedFields) {
   }, {});
 }
 
-export function createCustomer(customerInput = {}) {
+function normalizeCustomerForSupabase(customer) {
+  return CUSTOMER_FIELDS.reduce((record, field) => {
+    if (Object.prototype.hasOwnProperty.call(customer, field)) {
+      record[field] = customer[field] ?? null;
+    }
+    return record;
+  }, {
+    customer_id: customer.customer_id,
+    company_id: customer.company_id,
+    name: customer.name || '',
+    status: customer.status || 'active'
+  });
+}
+
+async function readSupabaseCustomers(companyId) {
+  if (!companyId) return null;
+
+  const response = await supabaseSelect('customers', {
+    select: CUSTOMER_SELECT_FIELDS,
+    company_id: `eq.${companyId}`,
+    order: 'name.asc'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+async function readSupabaseCustomer(customerId) {
+  const state = readState();
+  if (!state.company?.company_id) return null;
+
+  const response = await supabaseSelect('customers', {
+    select: CUSTOMER_SELECT_FIELDS,
+    company_id: `eq.${state.company.company_id}`,
+    customer_id: `eq.${customerId}`,
+    limit: '1'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
+}
+
+async function writeSupabaseCustomer(customer) {
+  const state = readState();
+  const record = normalizeCustomerForSupabase(customer);
+  if (!record.customer_id || !record.company_id) return null;
+
+  const companyReady = await ensureSupabaseCompany(state);
+  if (!companyReady) return null;
+
+  const response = await supabaseUpsert('customers', record, {
+    onConflict: 'customer_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
+}
+
+async function writeSupabaseCustomers(customers) {
+  const state = readState();
+  const records = customers.map(normalizeCustomerForSupabase).filter((customer) => (
+    customer.customer_id && customer.company_id
+  ));
+  if (!records.length) return null;
+
+  const companyReady = await ensureSupabaseCompany(state);
+  if (!companyReady) return null;
+
+  const response = await supabaseUpsert('customers', records, {
+    onConflict: 'customer_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+export async function syncCustomersFromSupabase() {
+  const state = readState();
+  const customers = await readSupabaseCustomers(state.company?.company_id);
+  if (!customers) return null;
+
+  if (!customers.length && (state.customers || []).length) {
+    const bootstrappedCustomers = await writeSupabaseCustomers(state.customers || []);
+    if (!bootstrappedCustomers) return null;
+
+    writeLocalCustomers(bootstrappedCustomers, {
+      action: 'customers:bootstrap-supabase'
+    });
+
+    return clone(bootstrappedCustomers);
+  }
+
+  writeLocalCustomers(customers, {
+    action: 'customers:sync-from-supabase'
+  });
+
+  return clone(customers);
+}
+
+export function listCustomers() {
+  return clone(localCustomers());
+}
+
+export function getCustomer(customerId) {
+  const customer = localCustomers().find((item) => item.customer_id === customerId);
+  return cloneOrNull(customer);
+}
+
+export async function listCustomersAsync() {
+  const state = readState();
+  const customers = await readSupabaseCustomers(state.company?.company_id);
+  return customers || listCustomers();
+}
+
+export async function getCustomerAsync(customerId) {
+  const customer = await readSupabaseCustomer(customerId);
+  return customer || getCustomer(customerId);
+}
+
+export async function createCustomer(customerInput = {}) {
   const state = readState();
   const customer = {
     customer_id: customerInput.customer_id || makeCustomerId(),
@@ -68,48 +221,55 @@ export function createCustomer(customerInput = {}) {
     phone: customerInput.phone || '',
     email: customerInput.email || '',
     billing_address: customerInput.billing_address || '',
+    notes: customerInput.notes,
+    customer_notes: customerInput.customer_notes,
+    billing_notes: customerInput.billing_notes,
+    preferred_service_day: customerInput.preferred_service_day,
+    default_service_location: customerInput.default_service_location,
+    default_service_frequency: customerInput.default_service_frequency,
     status: customerInput.status || 'active',
     created_at: customerInput.created_at || new Date().toISOString()
   };
 
-  const nextState = {
-    ...state,
-    customers: [...(state.customers || []), customer]
-  };
+  const customers = state.customers || [];
+  if (customers.some((item) => item.customer_id === customer.customer_id)) return null;
 
-  writeState(nextState, {
+  const persistedCustomer = (await writeSupabaseCustomer(customer)) || customer;
+  writeLocalCustomers([...customers, persistedCustomer], {
     action: 'customer:create',
-    customer_id: customer.customer_id
+    customer_id: persistedCustomer.customer_id
   });
 
   emit('customers:changed', {
     action: 'create',
-    customer_id: customer.customer_id,
-    customer: clone(customer)
+    customer_id: persistedCustomer.customer_id,
+    customer: clone(persistedCustomer)
   });
 
-  return clone(customer);
+  return clone(persistedCustomer);
 }
 
-export function updateCustomer(customerId, patch = {}, metadata = {}) {
+export async function updateCustomer(customerId, patch = {}, metadata = {}) {
   const state = readState();
   let updatedCustomer = null;
 
-  const nextState = {
-    ...state,
-    customers: (state.customers || []).map((customer) => {
-      if (customer.customer_id !== customerId) return customer;
-      updatedCustomer = {
-        ...customer,
-        ...patch
-      };
-      return updatedCustomer;
-    })
-  };
+  const customers = state.customers || [];
+  const nextCustomers = customers.map((customer) => {
+    if (customer.customer_id !== customerId) return customer;
+    updatedCustomer = {
+      ...customer,
+      ...patch
+    };
+    return updatedCustomer;
+  });
 
   if (!updatedCustomer) return null;
+  const persistedCustomer = (await writeSupabaseCustomer(updatedCustomer)) || updatedCustomer;
+  const persistedCustomers = nextCustomers.map((customer) => (
+    customer.customer_id === customerId ? persistedCustomer : customer
+  ));
 
-  writeState(nextState, {
+  writeLocalCustomers(persistedCustomers, {
     ...metadata,
     action: metadata.action || 'customer:update',
     customer_id: customerId
@@ -118,10 +278,10 @@ export function updateCustomer(customerId, patch = {}, metadata = {}) {
   emit('customers:changed', {
     action: metadata.eventAction || metadata.action || 'update',
     customer_id: customerId,
-    customer: clone(updatedCustomer)
+    customer: clone(persistedCustomer)
   });
 
-  return clone(updatedCustomer);
+  return clone(persistedCustomer);
 }
 
 export function deactivateCustomer(customerId, metadata = {}) {
@@ -134,54 +294,6 @@ export function deactivateCustomer(customerId, metadata = {}) {
       eventAction: metadata.eventAction || 'deactivate'
     }
   );
-}
-
-function listLocalCustomers() {
-  return clone(readState().customers || []);
-}
-
-function getLocalCustomer(customerId) {
-  const customer = (readState().customers || []).find((item) => item.customer_id === customerId);
-  return cloneOrNull(customer);
-}
-
-async function listSupabaseCustomers() {
-  const response = await supabaseSelect('customers', {
-    select: CUSTOMER_SELECT_FIELDS,
-    order: 'name.asc'
-  });
-
-  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
-  return clone(response.data);
-}
-
-async function getSupabaseCustomer(customerId) {
-  const response = await supabaseSelect('customers', {
-    select: CUSTOMER_SELECT_FIELDS,
-    customer_id: `eq.${customerId}`,
-    limit: '1'
-  });
-
-  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
-  return cloneOrNull(response.data[0]);
-}
-
-export function listCustomers() {
-  return listLocalCustomers();
-}
-
-export function getCustomer(customerId) {
-  return getLocalCustomer(customerId);
-}
-
-export async function listCustomersAsync() {
-  const customers = await listSupabaseCustomers();
-  return customers || listLocalCustomers();
-}
-
-export async function getCustomerAsync(customerId) {
-  const customer = await getSupabaseCustomer(customerId);
-  return customer || getLocalCustomer(customerId);
 }
 
 export function updateCustomerProfile(customerId, patch = {}) {

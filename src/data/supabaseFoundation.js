@@ -1,4 +1,6 @@
 import { syncEmployeesFromSupabase } from './repositories/employeeRepository.js';
+import { syncCustomersFromSupabase } from './repositories/customerRepository.js';
+import { syncPropertiesFromSupabase } from './repositories/propertyRepository.js';
 import { syncSettingsFromSupabase } from './repositories/settingsRepository.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
 
@@ -9,11 +11,15 @@ export async function syncFoundationFromSupabase() {
     syncSettingsFromSupabase(),
     syncEmployeesFromSupabase()
   ]);
+  const customers = await syncCustomersFromSupabase();
+  const properties = await syncPropertiesFromSupabase();
 
   return {
     configured: true,
-    synced: Boolean(settings || employees),
+    synced: Boolean(settings || employees || customers || properties),
     settings: Boolean(settings),
-    employees: Boolean(employees)
+    employees: Boolean(employees),
+    customers: Boolean(customers),
+    properties: Boolean(properties)
   };
 }
