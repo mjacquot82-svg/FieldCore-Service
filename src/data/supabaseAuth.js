@@ -1,4 +1,7 @@
-import { getSupabaseConfig } from './supabaseClient.js';
+import {
+  getSupabaseConfig,
+  setSupabaseAccessTokenProvider
+} from './supabaseClient.js';
 
 const AUTH_SESSION_KEY = 'fieldcore_supabase_auth_session_v1';
 const EXPIRY_SKEW_SECONDS = 60;
@@ -150,3 +153,8 @@ export async function signOut() {
   clearStoredAuthSession();
   return true;
 }
+
+setSupabaseAccessTokenProvider(async () => {
+  const session = await getCurrentAuthSession();
+  return session?.access_token || null;
+});

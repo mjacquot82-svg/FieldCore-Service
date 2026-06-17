@@ -1,4 +1,5 @@
 const CONFIG_STORAGE_KEY = 'fieldcore_supabase_config_v1';
+let accessTokenProvider = null;
 
 function readStoredConfig() {
   if (typeof localStorage === 'undefined') return null;
@@ -31,9 +32,44 @@ export function isSupabaseConfigured() {
   return Boolean(getSupabaseConfig());
 }
 
+export function setSupabaseAccessTokenProvider(provider) {
+  accessTokenProvider = typeof provider === 'function' ? provider : null;
+}
+
+async function getAuthorizationToken(config) {
+  if (!accessTokenProvider) return config.anonKey;
+
+  try {
+    return (await accessTokenProvider()) || config.anonKey;
+  } catch {
+    return config.anonKey;
+  }
+}
+
+export async function getSupabaseTransportContext() {
+  const config = getSupabaseConfig();
+  if (!config) {
+    return {
+      configured: false,
+      authenticated: false,
+      authorization: 'unconfigured'
+    };
+  }
+
+  const authorizationToken = await getAuthorizationToken(config);
+  const authenticated = authorizationToken !== config.anonKey;
+
+  return {
+    configured: true,
+    authenticated,
+    authorization: authenticated ? 'authenticated-user' : 'anon-key'
+  };
+}
+
 async function supabaseRequest(table, { method = 'GET', params = {}, body, headers = {} } = {}) {
   const config = getSupabaseConfig();
   if (!config) return { data: null, error: null, configured: false };
+  const authorizationToken = await getAuthorizationToken(config);
 
   const url = new URL(`${config.url}/rest/v1/${table}`);
   Object.entries(params).forEach(([key, value]) => {
@@ -47,7 +83,7 @@ async function supabaseRequest(table, { method = 'GET', params = {}, body, heade
       method,
       headers: {
         apikey: config.anonKey,
-        Authorization: `Bearer ${config.anonKey}`,
+        Authorization: `Bearer ${authorizationToken}`,
         Accept: 'application/json',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...headers

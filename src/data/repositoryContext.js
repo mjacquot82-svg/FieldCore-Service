@@ -1,5 +1,6 @@
 import { getAuthenticatedUser } from './supabaseAuth.js';
 import { getCompanyMembershipForUser } from './repositories/companyMembershipRepository.js';
+import { getSupabaseTransportContext } from './supabaseClient.js';
 import { readState } from './storage/local-state-adapter.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -58,4 +59,39 @@ export async function resolveRepositoryCompanyId() {
 export async function resolveRepositoryCompany() {
   const context = await resolveRepositoryCompanyContext();
   return context?.company || null;
+}
+
+export async function validateRepositoryAuthContext() {
+  const [context, transport] = await Promise.all([
+    resolveRepositoryCompanyContext(),
+    getSupabaseTransportContext()
+  ]);
+  const authenticated = Boolean(context?.authenticated);
+  const membershipActive = context?.membership?.status === 'active';
+  const membershipUserLinked = Boolean(
+    context?.user?.id &&
+    context?.membership?.user_id === context.user.id
+  );
+  const companyResolved = Boolean(context?.companyId);
+  const transportAuthenticated = Boolean(transport?.authenticated);
+  const ownerMembershipLinked = Boolean(
+    context?.membership?.role === 'owner' &&
+    membershipUserLinked
+  );
+
+  return {
+    ready: authenticated && membershipActive && membershipUserLinked && companyResolved && transportAuthenticated,
+    authenticated,
+    transportAuthenticated,
+    membershipActive,
+    membershipUserLinked,
+    ownerMembershipLinked,
+    companyResolved,
+    userId: context?.user?.id || null,
+    membershipId: context?.membership?.membership_id || null,
+    companyId: context?.companyId || null,
+    role: context?.membership?.role || null,
+    source: context?.source || null,
+    transport
+  };
 }
