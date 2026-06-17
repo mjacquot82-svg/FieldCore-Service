@@ -1,6 +1,19 @@
 import { emit } from '../appEventBus.js';
+import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
+const SHIFT_FIELDS = [
+  'shift_id',
+  'company_id',
+  'employee_id',
+  'employee_name',
+  'started_at',
+  'ended_at',
+  'created_at',
+  'updated_at'
+];
+
+const SHIFT_SELECT_FIELDS = SHIFT_FIELDS.join(',');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function cloneOrNull(value) {
@@ -11,80 +24,212 @@ function makeShiftId() {
   return crypto.randomUUID();
 }
 
+function localShifts() {
+  return readState().shifts || [];
+}
+
+function writeLocalShifts(shifts, metadata = {}) {
+  const state = readState();
+  const nextState = {
+    ...state,
+    shifts
+  };
+
+  writeState(nextState, metadata);
+  return shifts;
+}
+
+function normalizeShiftForSupabase(shift) {
+  return SHIFT_FIELDS.reduce((record, field) => {
+    if (Object.prototype.hasOwnProperty.call(shift, field)) {
+      record[field] = shift[field] ?? null;
+    }
+    return record;
+  }, {
+    shift_id: shift.shift_id,
+    company_id: shift.company_id,
+    employee_id: shift.employee_id,
+    employee_name: shift.employee_name || null,
+    started_at: shift.started_at,
+    ended_at: shift.ended_at || null
+  });
+}
+
+async function readSupabaseShifts(companyId) {
+  if (!companyId) return null;
+
+  const response = await supabaseSelect('shifts', {
+    select: SHIFT_SELECT_FIELDS,
+    company_id: `eq.${companyId}`,
+    order: 'started_at.desc'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+async function readSupabaseActiveShift(employeeId) {
+  const state = readState();
+  if (!state.company?.company_id || !employeeId) return null;
+
+  const response = await supabaseSelect('shifts', {
+    select: SHIFT_SELECT_FIELDS,
+    company_id: `eq.${state.company.company_id}`,
+    employee_id: `eq.${employeeId}`,
+    ended_at: 'is.null',
+    limit: '1'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
+}
+
+async function writeSupabaseShift(shift) {
+  const record = normalizeShiftForSupabase(shift);
+  if (!record.shift_id || !record.company_id || !record.employee_id || !record.started_at) return null;
+
+  const response = await supabaseUpsert('shifts', record, {
+    onConflict: 'shift_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
+}
+
+async function writeSupabaseShifts(shifts) {
+  const records = shifts.map(normalizeShiftForSupabase).filter((shift) => (
+    shift.shift_id && shift.company_id && shift.employee_id && shift.started_at
+  ));
+  if (!records.length) return null;
+
+  const response = await supabaseUpsert('shifts', records, {
+    onConflict: 'shift_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return clone(response.data);
+}
+
+export async function syncShiftsFromSupabase() {
+  const state = readState();
+  const shifts = await readSupabaseShifts(state.company?.company_id);
+  if (!shifts) return null;
+
+  if (!shifts.length && (state.shifts || []).length) {
+    const bootstrappedShifts = await writeSupabaseShifts(state.shifts || []);
+    if (!bootstrappedShifts) return null;
+
+    writeLocalShifts(bootstrappedShifts, {
+      action: 'shifts:bootstrap-supabase'
+    });
+
+    return clone(bootstrappedShifts);
+  }
+
+  writeLocalShifts(shifts, {
+    action: 'shifts:sync-from-supabase'
+  });
+
+  return clone(shifts);
+}
+
 export function listShifts() {
-  return clone(readState().shifts || []);
+  return clone(localShifts());
+}
+
+export async function listShiftsAsync() {
+  const state = readState();
+  const shifts = await readSupabaseShifts(state.company?.company_id);
+  return shifts || listShifts();
 }
 
 export function getActiveShift(employeeId) {
-  const shift = (readState().shifts || []).find(
+  const shift = localShifts().find(
     (item) => item.employee_id === employeeId && !item.ended_at
   );
   return cloneOrNull(shift);
 }
 
-export function startShift(employeeId, metadata = {}) {
+export async function getActiveShiftAsync(employeeId) {
+  const shift = await readSupabaseActiveShift(employeeId);
+  return shift || getActiveShift(employeeId);
+}
+
+export async function startShift(employeeId, metadata = {}) {
   const state = readState();
   const shifts = state.shifts || [];
   const activeShift = shifts.find((shift) => shift.employee_id === employeeId && !shift.ended_at);
 
   if (activeShift) return clone(activeShift);
 
+  const remoteActiveShift = await readSupabaseActiveShift(employeeId);
+  if (remoteActiveShift) {
+    writeLocalShifts([...shifts, remoteActiveShift], {
+      action: 'shift:sync-active',
+      employee_id: employeeId,
+      shift_id: remoteActiveShift.shift_id
+    });
+    return clone(remoteActiveShift);
+  }
+
   const shift = {
     shift_id: makeShiftId(),
+    company_id: metadata.company_id || state.company?.company_id,
     employee_id: employeeId,
     employee_name: metadata.employee_name || metadata.employeeName || '',
-    started_at: new Date().toISOString()
+    started_at: metadata.started_at || new Date().toISOString()
   };
 
-  const nextState = {
-    ...state,
-    shifts: [...shifts, shift]
-  };
+  const persistedShift = (await writeSupabaseShift(shift)) || shift;
 
-  writeState(nextState, {
-    action: 'shift:start',
-    employee_id: employeeId
+  writeLocalShifts([...shifts, persistedShift], {
+    ...metadata,
+    action: metadata.action || 'shift:start',
+    employee_id: employeeId,
+    shift_id: persistedShift.shift_id
   });
 
   emit('shifts:changed', {
     action: 'start',
     employee_id: employeeId,
-    shift: clone(shift)
+    shift: clone(persistedShift)
   });
 
-  return clone(shift);
+  return clone(persistedShift);
 }
 
-export function endShift(employeeId, metadata = {}) {
+export async function endShift(employeeId, metadata = {}) {
   const state = readState();
   const shifts = state.shifts || [];
   let endedShift = null;
 
-  const nextState = {
-    ...state,
-    shifts: shifts.map((shift) => {
-      if (endedShift || shift.employee_id !== employeeId || shift.ended_at) return shift;
-      endedShift = {
-        ...shift,
-        ended_at: metadata.ended_at || new Date().toISOString()
-      };
-      return endedShift;
-    })
-  };
+  const nextShifts = shifts.map((shift) => {
+    if (endedShift || shift.employee_id !== employeeId || shift.ended_at) return shift;
+    endedShift = {
+      ...shift,
+      ended_at: metadata.ended_at || new Date().toISOString()
+    };
+    return endedShift;
+  });
 
   if (!endedShift) return null;
+  const persistedShift = (await writeSupabaseShift(endedShift)) || endedShift;
+  const persistedShifts = nextShifts.map((shift) => (
+    shift.shift_id === persistedShift.shift_id ? persistedShift : shift
+  ));
 
-  writeState(nextState, {
-    action: 'shift:end',
+  writeLocalShifts(persistedShifts, {
+    ...metadata,
+    action: metadata.action || 'shift:end',
     employee_id: employeeId,
-    shift_id: endedShift.shift_id
+    shift_id: persistedShift.shift_id
   });
 
   emit('shifts:changed', {
     action: 'end',
     employee_id: employeeId,
-    shift: clone(endedShift)
+    shift: clone(persistedShift)
   });
 
-  return clone(endedShift);
+  return clone(persistedShift);
 }

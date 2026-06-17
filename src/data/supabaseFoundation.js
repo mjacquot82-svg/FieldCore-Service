@@ -5,6 +5,7 @@ import { syncPaymentsFromSupabase } from './repositories/paymentRepository.js';
 import { syncPropertiesFromSupabase } from './repositories/propertyRepository.js';
 import { syncRoutesFromSupabase } from './repositories/routeRepository.js';
 import { syncSettingsFromSupabase } from './repositories/settingsRepository.js';
+import { syncShiftsFromSupabase } from './repositories/shiftRepository.js';
 import { syncVisitsFromSupabase } from './repositories/visitRepository.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
 
@@ -21,10 +22,11 @@ export async function syncFoundationFromSupabase() {
   const routes = await syncRoutesFromSupabase();
   const invoices = await syncInvoicesFromSupabase();
   const payments = await syncPaymentsFromSupabase();
+  const shifts = await syncShiftsFromSupabase();
 
   return {
     configured: true,
-    synced: Boolean(settings || employees || customers || properties || visits || routes || invoices || payments),
+    synced: Boolean(settings || employees || customers || properties || visits || routes || invoices || payments || shifts),
     settings: Boolean(settings),
     employees: Boolean(employees),
     customers: Boolean(customers),
@@ -32,6 +34,7 @@ export async function syncFoundationFromSupabase() {
     visits: Boolean(visits),
     routes: Boolean(routes),
     invoices: Boolean(invoices),
-    payments: Boolean(payments)
+    payments: Boolean(payments),
+    shifts: Boolean(shifts)
   };
 }

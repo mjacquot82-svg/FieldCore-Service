@@ -18,13 +18,13 @@ function isWorkerSession(session) {
   return ['employee', 'worker'].includes(String(session?.role || '').toLowerCase());
 }
 
-function startShift(employeeId, employeeName) {
-  startShiftRecord(employeeId, { employee_name: employeeName });
+async function startShift(employeeId, employeeName) {
+  await startShiftRecord(employeeId, { employee_name: employeeName });
   renderShiftBanner();
 }
 
-function endShift(employeeId) {
-  endShiftRecord(employeeId);
+async function endShift(employeeId) {
+  await endShiftRecord(employeeId);
   renderShiftBanner();
 }
 
