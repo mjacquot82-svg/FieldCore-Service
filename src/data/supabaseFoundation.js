@@ -15,12 +15,12 @@ export async function syncFoundationFromSupabase() {
   if (!isSupabaseConfigured()) return { configured: false, synced: false };
 
   const initialAuthContext = await resolveRepositoryCompanyContext();
+  const companyMemberships = await syncCompanyMembershipsFromSupabase();
+  const authContext = await resolveRepositoryCompanyContext();
   const [settings, employees] = await Promise.all([
     syncSettingsFromSupabase(),
     syncEmployeesFromSupabase()
   ]);
-  const companyMemberships = await syncCompanyMembershipsFromSupabase();
-  const authContext = await resolveRepositoryCompanyContext();
   const customers = await syncCustomersFromSupabase();
   const properties = await syncPropertiesFromSupabase();
   const visits = await syncVisitsFromSupabase();

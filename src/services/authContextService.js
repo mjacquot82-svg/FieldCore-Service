@@ -17,6 +17,10 @@ export async function getAuthMembershipDiagnostics() {
 
 export async function getRlsFoundationPreflight() {
   const diagnostics = await validateRepositoryAuthContext();
+  const role = diagnostics.role;
+  const isOwner = role === 'owner';
+  const isAdmin = role === 'admin';
+  const isManager = role === 'manager';
   const checks = {
     authenticatedUser: diagnostics.authenticated,
     authenticatedTransport: diagnostics.transportAuthenticated,
@@ -25,10 +29,25 @@ export async function getRlsFoundationPreflight() {
     companyResolved: diagnostics.companyResolved,
     roleResolved: Boolean(diagnostics.role)
   };
+  const operationalAccess = {
+    settings: {
+      canRead: isOwner || isAdmin || isManager,
+      canWrite: isOwner || isAdmin
+    },
+    employees: {
+      canRead: isOwner || isAdmin || isManager,
+      canWrite: isOwner || isAdmin
+    },
+    servicePlans: {
+      canRead: isOwner || isAdmin || isManager,
+      canWrite: isOwner || isAdmin || isManager
+    }
+  };
 
   return {
     ready: Object.values(checks).every(Boolean),
     checks,
+    operationalAccess,
     diagnostics
   };
 }

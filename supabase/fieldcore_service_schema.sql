@@ -217,6 +217,67 @@ create policy "owners can manage company memberships"
   using (public.has_company_role(company_id, array['owner']))
   with check (public.has_company_role(company_id, array['owner']));
 
+alter table public.company_settings enable row level security;
+alter table public.employees enable row level security;
+
+drop policy if exists "owners admins and managers can read company settings" on public.company_settings;
+create policy "owners admins and managers can read company settings"
+  on public.company_settings
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners and admins can insert company settings" on public.company_settings;
+create policy "owners and admins can insert company settings"
+  on public.company_settings
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners and admins can update company settings" on public.company_settings;
+create policy "owners and admins can update company settings"
+  on public.company_settings
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']))
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners can delete company settings" on public.company_settings;
+create policy "owners can delete company settings"
+  on public.company_settings
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner']));
+
+drop policy if exists "owners admins and managers can read employees" on public.employees;
+create policy "owners admins and managers can read employees"
+  on public.employees
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners and admins can insert employees" on public.employees;
+create policy "owners and admins can insert employees"
+  on public.employees
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners and admins can update employees" on public.employees;
+create policy "owners and admins can update employees"
+  on public.employees
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']))
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners and admins can delete employees" on public.employees;
+create policy "owners and admins can delete employees"
+  on public.employees
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
 alter table public.company_settings
   add column if not exists admin_pin text;
 
@@ -322,6 +383,37 @@ create table if not exists public.service_plans (
   ),
   constraint service_plans_company_name_key unique (company_id, name)
 );
+
+alter table public.service_plans enable row level security;
+
+drop policy if exists "owners admins and managers can read service plans" on public.service_plans;
+create policy "owners admins and managers can read service plans"
+  on public.service_plans
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert service plans" on public.service_plans;
+create policy "owners admins and managers can insert service plans"
+  on public.service_plans
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can update service plans" on public.service_plans;
+create policy "owners admins and managers can update service plans"
+  on public.service_plans
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners and admins can delete service plans" on public.service_plans;
+create policy "owners and admins can delete service plans"
+  on public.service_plans
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 create table if not exists public.properties (
   property_id text primary key default ('prop_' || replace(gen_random_uuid()::text, '-', '')),
