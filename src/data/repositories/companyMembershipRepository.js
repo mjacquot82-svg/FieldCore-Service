@@ -92,15 +92,17 @@ async function readSupabaseMemberships(companyId) {
 }
 
 async function readSupabaseMembershipForUser(companyId, userId) {
-  if (!companyId || !userId) return null;
+  if (!userId) return null;
 
-  const response = await supabaseSelect('company_memberships', {
+  const params = {
     select: MEMBERSHIP_SELECT_FIELDS,
-    company_id: `eq.${companyId}`,
     user_id: `eq.${userId}`,
     status: 'eq.active',
     limit: '1'
-  });
+  };
+  if (companyId) params.company_id = `eq.${companyId}`;
+
+  const response = await supabaseSelect('company_memberships', params);
 
   if (!response.configured || response.error || !Array.isArray(response.data)) return null;
   return response.data[0] ? clone(response.data[0]) : null;
@@ -176,12 +178,23 @@ export async function getCompanyMembershipForUser(userId, companyId = readState(
   if (remoteMembership) return remoteMembership;
 
   const localMembership = localMemberships().find((membership) =>
-    membership.company_id === companyId &&
+    (!companyId || membership.company_id === companyId) &&
     membership.user_id === userId &&
     membership.status === 'active'
   );
 
-  return localMembership ? clone(localMembership) : null;
+  if (localMembership) return clone(localMembership);
+  if (!companyId) return null;
+
+  const remoteMembershipForAnyCompany = await readSupabaseMembershipForUser(null, userId);
+  if (remoteMembershipForAnyCompany) return remoteMembershipForAnyCompany;
+
+  const localMembershipForAnyCompany = localMemberships().find((membership) =>
+    membership.user_id === userId &&
+    membership.status === 'active'
+  );
+
+  return localMembershipForAnyCompany ? clone(localMembershipForAnyCompany) : null;
 }
 
 export async function ensureDefaultOwnerMembership(metadata = {}) {

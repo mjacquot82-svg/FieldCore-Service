@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -37,14 +38,14 @@ function writeLocalEmployees(employees, metadata = {}) {
   return employees;
 }
 
-async function ensureSupabaseCompany(state) {
+async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
   const company = state.company;
-  if (!company?.company_id) return false;
+  if (!companyId) return false;
 
   const response = await supabaseUpsert(
     'companies',
     {
-      company_id: company.company_id,
+      company_id: companyId,
       name: company.name || 'FieldCore',
       status: company.status || 'active',
       created_at: company.created_at
@@ -85,7 +86,7 @@ async function writeSupabaseEmployee(employee) {
   const record = normalizeEmployeeForSupabase(employee);
   if (!record.employee_id || !record.company_id) return null;
 
-  const companyReady = await ensureSupabaseCompany(state);
+  const companyReady = await ensureSupabaseCompany(state, record.company_id);
   if (!companyReady) return null;
 
   const response = await supabaseUpsert('employees', record, {
@@ -126,7 +127,8 @@ async function deleteSupabaseEmployee(employeeId) {
 
 export async function syncEmployeesFromSupabase() {
   const state = readState();
-  const employees = await readSupabaseEmployees(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const employees = await readSupabaseEmployees(companyId);
   if (!employees) return null;
 
   if (!employees.length && (state.employees || []).length) {
@@ -162,9 +164,10 @@ export function getEmployee(employeeId) {
 
 export async function createEmployee(employeeInput = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const employee = {
     employee_id: employeeInput.employee_id || makeEmployeeId(),
-    company_id: employeeInput.company_id || state.company?.company_id,
+    company_id: employeeInput.company_id || companyId,
     name: employeeInput.name || '',
     role: employeeInput.role || 'Worker',
     pin: employeeInput.pin || '',

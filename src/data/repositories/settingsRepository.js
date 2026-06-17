@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -31,14 +32,14 @@ function writeLocalSettings(settings, metadata = {}) {
   return settings;
 }
 
-async function ensureSupabaseCompany(state) {
+async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
   const company = state.company;
-  if (!company?.company_id) return false;
+  if (!companyId) return false;
 
   const response = await supabaseUpsert(
     'companies',
     {
-      company_id: company.company_id,
+      company_id: companyId,
       name: company.name || 'FieldCore',
       status: company.status || 'active',
       created_at: company.created_at
@@ -49,8 +50,8 @@ async function ensureSupabaseCompany(state) {
   return response.configured && !response.error;
 }
 
-function normalizeSettingsForSupabase(settings, state) {
-  const companyId = settings.company_id || state.company?.company_id;
+function normalizeSettingsForSupabase(settings, state, activeCompanyId = state.company?.company_id) {
+  const companyId = settings.company_id || activeCompanyId;
   return {
     settings_id: settings.settings_id || `settings_${companyId || 'default'}`,
     company_id: companyId,
@@ -87,10 +88,11 @@ async function readSupabaseSettings(companyId) {
 
 async function writeSupabaseSettings(settings) {
   const state = readState();
-  const record = normalizeSettingsForSupabase(settings, state);
+  const companyId = await resolveRepositoryCompanyId();
+  const record = normalizeSettingsForSupabase(settings, state, companyId);
   if (!record.company_id) return null;
 
-  const companyReady = await ensureSupabaseCompany(state);
+  const companyReady = await ensureSupabaseCompany(state, record.company_id);
   if (!companyReady) return null;
 
   const response = await supabaseUpsert('company_settings', record, {
@@ -103,7 +105,8 @@ async function writeSupabaseSettings(settings) {
 
 export async function syncSettingsFromSupabase() {
   const state = readState();
-  const settings = await readSupabaseSettings(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const settings = await readSupabaseSettings(companyId);
   if (!settings) {
     const local = localSettings();
     if (!local.company_id) return null;

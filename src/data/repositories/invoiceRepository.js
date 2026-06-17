@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -159,19 +160,19 @@ async function readSupabaseInvoices(companyId) {
 }
 
 async function readSupabaseInvoice(invoiceId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const [invoiceResponse, lineItemResponse] = await Promise.all([
     supabaseSelect('invoices', {
       select: INVOICE_SELECT_FIELDS,
-      company_id: `eq.${state.company.company_id}`,
+      company_id: `eq.${companyId}`,
       invoice_id: `eq.${invoiceId}`,
       limit: '1'
     }),
     supabaseSelect('invoice_line_items', {
       select: LINE_ITEM_SELECT_FIELDS,
-      company_id: `eq.${state.company.company_id}`,
+      company_id: `eq.${companyId}`,
       invoice_id: `eq.${invoiceId}`,
       order: 'line_order.asc'
     })
@@ -246,7 +247,8 @@ async function writeSupabaseInvoices(invoices) {
 
 export async function syncInvoicesFromSupabase() {
   const state = readState();
-  const invoices = await readSupabaseInvoices(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const invoices = await readSupabaseInvoices(companyId);
   if (!invoices) return null;
 
   if (!invoices.length && (state.invoices || []).length) {
@@ -272,8 +274,7 @@ export function listInvoices() {
 }
 
 export async function listInvoicesAsync() {
-  const state = readState();
-  const invoices = await readSupabaseInvoices(state.company?.company_id);
+  const invoices = await readSupabaseInvoices(await resolveRepositoryCompanyId());
   return invoices || listInvoices();
 }
 
@@ -295,9 +296,10 @@ export async function createInvoices(invoices, metadata = {}) {
   if (!invoices.length) return [];
 
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const nextInvoices = clone(invoices).map((invoice) => ({
     ...invoice,
-    company_id: invoice.company_id || state.company?.company_id
+    company_id: invoice.company_id || companyId
   }));
   const persistedInvoices = (await writeSupabaseInvoices(nextInvoices)) || nextInvoices;
 

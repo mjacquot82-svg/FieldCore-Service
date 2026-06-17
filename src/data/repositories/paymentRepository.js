@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -105,7 +106,8 @@ async function writeSupabasePayments(payments) {
 
 export async function syncPaymentsFromSupabase() {
   const state = readState();
-  const payments = await readSupabasePayments(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const payments = await readSupabasePayments(companyId);
   if (!payments) return null;
 
   if (!payments.length && (state.payments || []).length) {
@@ -131,8 +133,7 @@ export function listPayments() {
 }
 
 export async function listPaymentsAsync() {
-  const state = readState();
-  const payments = await readSupabasePayments(state.company?.company_id);
+  const payments = await readSupabasePayments(await resolveRepositoryCompanyId());
   return payments || listPayments();
 }
 
@@ -142,9 +143,10 @@ export function listPaymentsByInvoice(invoiceId) {
 
 export async function createPayment(paymentInput = {}, metadata = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const payment = {
     payment_id: paymentInput.payment_id || makePaymentId(),
-    company_id: paymentInput.company_id || state.company?.company_id,
+    company_id: paymentInput.company_id || companyId,
     invoice_id: paymentInput.invoice_id,
     amount: Number(paymentInput.amount ?? 0),
     payment_date: paymentInput.payment_date || new Date().toISOString().slice(0, 10),

@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -85,12 +86,12 @@ async function readSupabaseRoutes(companyId) {
 }
 
 async function readSupabaseRoute(routeId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const response = await supabaseSelect('routes', {
     select: ROUTE_SELECT_FIELDS,
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     route_id: `eq.${routeId}`,
     limit: '1'
   });
@@ -126,11 +127,11 @@ async function writeSupabaseRoutes(routes) {
 }
 
 async function deleteSupabaseRoute(routeId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const response = await supabaseDelete('routes', {
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     route_id: `eq.${routeId}`
   });
 
@@ -140,7 +141,8 @@ async function deleteSupabaseRoute(routeId) {
 
 export async function syncRoutesFromSupabase() {
   const state = readState();
-  const routes = await readSupabaseRoutes(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const routes = await readSupabaseRoutes(companyId);
   if (!routes) return null;
 
   if (!routes.length && (state.routes || []).length) {
@@ -166,8 +168,7 @@ export function listRoutes() {
 }
 
 export async function listRoutesAsync() {
-  const state = readState();
-  const routes = await readSupabaseRoutes(state.company?.company_id);
+  const routes = await readSupabaseRoutes(await resolveRepositoryCompanyId());
   return routes || listRoutes();
 }
 
@@ -192,9 +193,10 @@ export async function getRouteAsync(routeId) {
 
 export async function createRoute(routeInput = {}, metadata = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const route = {
     route_id: routeInput.route_id || makeRouteId(),
-    company_id: routeInput.company_id || state.company?.company_id,
+    company_id: routeInput.company_id || companyId,
     name: routeInput.name,
     route_day: routeInput.route_day,
     route_date: routeInput.route_date,

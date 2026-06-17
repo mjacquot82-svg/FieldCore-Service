@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -106,12 +107,12 @@ async function readSupabaseVisits(companyId) {
 }
 
 async function readSupabaseVisit(visitId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const response = await supabaseSelect('visits', {
     select: VISIT_SELECT_FIELDS,
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     visit_id: `eq.${visitId}`,
     limit: '1'
   });
@@ -148,7 +149,8 @@ async function writeSupabaseVisits(visits) {
 
 export async function syncVisitsFromSupabase() {
   const state = readState();
-  const visits = await readSupabaseVisits(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const visits = await readSupabaseVisits(companyId);
   if (!visits) return null;
 
   if (!visits.length && (state.visits || []).length) {
@@ -183,8 +185,7 @@ export function listVisits() {
 }
 
 export async function listVisitsAsync() {
-  const state = readState();
-  const visits = await readSupabaseVisits(state.company?.company_id);
+  const visits = await readSupabaseVisits(await resolveRepositoryCompanyId());
   return visits || listVisits();
 }
 
@@ -194,9 +195,10 @@ export function listVisitsByDate(visitDate) {
 
 export async function createVisit(visit, metadata = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const nextVisit = clone({
     ...visit,
-    company_id: visit.company_id || state.company?.company_id
+    company_id: visit.company_id || companyId
   });
 
   const persistedVisit = (await writeSupabaseVisit(nextVisit)) || nextVisit;
@@ -243,9 +245,10 @@ export async function bulkCreateVisits(visits = [], metadata = {}) {
   if (!visits.length) return [];
 
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const nextVisits = visits.map((visit) => clone({
     ...visit,
-    company_id: visit.company_id || state.company?.company_id,
+    company_id: visit.company_id || companyId,
     visit_id: visit.visit_id || makeVisitId(),
     created_at: visit.created_at || new Date().toISOString()
   }));

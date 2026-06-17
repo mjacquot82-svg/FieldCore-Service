@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -85,12 +86,12 @@ async function readSupabaseProperties(companyId) {
 }
 
 async function readSupabaseProperty(propertyId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const response = await supabaseSelect('properties', {
     select: PROPERTY_SELECT_FIELDS,
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     property_id: `eq.${propertyId}`,
     limit: '1'
   });
@@ -127,7 +128,8 @@ async function writeSupabaseProperties(properties) {
 
 export async function syncPropertiesFromSupabase() {
   const state = readState();
-  const properties = await readSupabaseProperties(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const properties = await readSupabaseProperties(companyId);
   if (!properties) return null;
 
   if (!properties.length && (state.properties || []).length) {
@@ -153,8 +155,7 @@ export function listProperties() {
 }
 
 export async function listPropertiesAsync() {
-  const state = readState();
-  const properties = await readSupabaseProperties(state.company?.company_id);
+  const properties = await readSupabaseProperties(await resolveRepositoryCompanyId());
   return properties || listProperties();
 }
 
@@ -170,9 +171,10 @@ export async function getPropertyAsync(propertyId) {
 
 export async function createProperty(propertyInput = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const property = {
     property_id: propertyInput.property_id || makePropertyId(),
-    company_id: propertyInput.company_id || state.company?.company_id,
+    company_id: propertyInput.company_id || companyId,
     customer_id: propertyInput.customer_id,
     service_plan_id: propertyInput.service_plan_id,
     service_address: propertyInput.service_address,

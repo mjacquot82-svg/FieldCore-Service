@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -66,14 +67,14 @@ function writeLocalCustomers(customers, metadata = {}) {
   return customers;
 }
 
-async function ensureSupabaseCompany(state) {
+async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
   const company = state.company;
-  if (!company?.company_id) return false;
+  if (!companyId) return false;
 
   const response = await supabaseUpsert(
     'companies',
     {
-      company_id: company.company_id,
+      company_id: companyId,
       name: company.name || 'FieldCore',
       status: company.status || 'active',
       created_at: company.created_at
@@ -121,12 +122,12 @@ async function readSupabaseCustomers(companyId) {
 }
 
 async function readSupabaseCustomer(customerId) {
-  const state = readState();
-  if (!state.company?.company_id) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId) return null;
 
   const response = await supabaseSelect('customers', {
     select: CUSTOMER_SELECT_FIELDS,
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     customer_id: `eq.${customerId}`,
     limit: '1'
   });
@@ -140,7 +141,7 @@ async function writeSupabaseCustomer(customer) {
   const record = normalizeCustomerForSupabase(customer);
   if (!record.customer_id || !record.company_id) return null;
 
-  const companyReady = await ensureSupabaseCompany(state);
+  const companyReady = await ensureSupabaseCompany(state, record.company_id);
   if (!companyReady) return null;
 
   const response = await supabaseUpsert('customers', record, {
@@ -171,7 +172,8 @@ async function writeSupabaseCustomers(customers) {
 
 export async function syncCustomersFromSupabase() {
   const state = readState();
-  const customers = await readSupabaseCustomers(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const customers = await readSupabaseCustomers(companyId);
   if (!customers) return null;
 
   if (!customers.length && (state.customers || []).length) {
@@ -202,8 +204,7 @@ export function getCustomer(customerId) {
 }
 
 export async function listCustomersAsync() {
-  const state = readState();
-  const customers = await readSupabaseCustomers(state.company?.company_id);
+  const customers = await readSupabaseCustomers(await resolveRepositoryCompanyId());
   return customers || listCustomers();
 }
 
@@ -214,9 +215,10 @@ export async function getCustomerAsync(customerId) {
 
 export async function createCustomer(customerInput = {}) {
   const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
   const customer = {
     customer_id: customerInput.customer_id || makeCustomerId(),
-    company_id: customerInput.company_id || state.company?.company_id,
+    company_id: customerInput.company_id || companyId,
     name: customerInput.name || '',
     phone: customerInput.phone || '',
     email: customerInput.email || '',

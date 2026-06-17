@@ -8,16 +8,19 @@ import { syncRoutesFromSupabase } from './repositories/routeRepository.js';
 import { syncSettingsFromSupabase } from './repositories/settingsRepository.js';
 import { syncShiftsFromSupabase } from './repositories/shiftRepository.js';
 import { syncVisitsFromSupabase } from './repositories/visitRepository.js';
+import { resolveRepositoryCompanyContext } from './repositoryContext.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
 
 export async function syncFoundationFromSupabase() {
   if (!isSupabaseConfigured()) return { configured: false, synced: false };
 
+  const initialAuthContext = await resolveRepositoryCompanyContext();
   const [settings, employees] = await Promise.all([
     syncSettingsFromSupabase(),
     syncEmployeesFromSupabase()
   ]);
   const companyMemberships = await syncCompanyMembershipsFromSupabase();
+  const authContext = await resolveRepositoryCompanyContext();
   const customers = await syncCustomersFromSupabase();
   const properties = await syncPropertiesFromSupabase();
   const visits = await syncVisitsFromSupabase();
@@ -32,6 +35,7 @@ export async function syncFoundationFromSupabase() {
     settings: Boolean(settings),
     employees: Boolean(employees),
     companyMemberships: Boolean(companyMemberships),
+    authContext: Boolean(authContext?.companyId || initialAuthContext?.companyId),
     customers: Boolean(customers),
     properties: Boolean(properties),
     visits: Boolean(visits),

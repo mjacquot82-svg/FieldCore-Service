@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -69,12 +70,12 @@ async function readSupabaseShifts(companyId) {
 }
 
 async function readSupabaseActiveShift(employeeId) {
-  const state = readState();
-  if (!state.company?.company_id || !employeeId) return null;
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId || !employeeId) return null;
 
   const response = await supabaseSelect('shifts', {
     select: SHIFT_SELECT_FIELDS,
-    company_id: `eq.${state.company.company_id}`,
+    company_id: `eq.${companyId}`,
     employee_id: `eq.${employeeId}`,
     ended_at: 'is.null',
     limit: '1'
@@ -112,7 +113,8 @@ async function writeSupabaseShifts(shifts) {
 
 export async function syncShiftsFromSupabase() {
   const state = readState();
-  const shifts = await readSupabaseShifts(state.company?.company_id);
+  const companyId = await resolveRepositoryCompanyId();
+  const shifts = await readSupabaseShifts(companyId);
   if (!shifts) return null;
 
   if (!shifts.length && (state.shifts || []).length) {
@@ -138,8 +140,7 @@ export function listShifts() {
 }
 
 export async function listShiftsAsync() {
-  const state = readState();
-  const shifts = await readSupabaseShifts(state.company?.company_id);
+  const shifts = await readSupabaseShifts(await resolveRepositoryCompanyId());
   return shifts || listShifts();
 }
 
@@ -174,7 +175,7 @@ export async function startShift(employeeId, metadata = {}) {
 
   const shift = {
     shift_id: makeShiftId(),
-    company_id: metadata.company_id || state.company?.company_id,
+    company_id: metadata.company_id || await resolveRepositoryCompanyId(),
     employee_id: employeeId,
     employee_name: metadata.employee_name || metadata.employeeName || '',
     started_at: metadata.started_at || new Date().toISOString()
