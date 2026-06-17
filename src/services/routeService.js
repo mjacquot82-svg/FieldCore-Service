@@ -32,7 +32,7 @@ function removeVisitFromAllRoutes(visitId) {
   });
 }
 
-export function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
+export async function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
   const existingRoute = findMatchingRoute(listRoutes(), routeInput);
   const route = existingRoute
     ? addStopsToRoute(existingRoute.route_id, visitIds, {
@@ -54,13 +54,13 @@ export function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
 
   if (!route) return null;
 
-  visitIds.forEach((visitId) => {
-    assignVisitToRoute(visitId, route, {
+  for (const visitId of visitIds) {
+    await assignVisitToRoute(visitId, route, {
       action: 'visit:assign-route-from-route-service',
       eventAction: 'assign-route-from-route-service',
       route_id: route.route_id
     });
-  });
+  }
 
   return {
     route,
@@ -68,9 +68,9 @@ export function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
   };
 }
 
-export function removeStopFromRoutes(visitId, metadata = {}) {
+export async function removeStopFromRoutes(visitId, metadata = {}) {
   removeVisitFromAllRoutes(visitId);
-  clearVisitRouteAssignment(visitId, {
+  await clearVisitRouteAssignment(visitId, {
     ...metadata,
     action: 'visit:clear-route-from-route-service',
     eventAction: 'clear-route-from-route-service'
@@ -79,7 +79,7 @@ export function removeStopFromRoutes(visitId, metadata = {}) {
   return readState();
 }
 
-export function moveStopToRoute(routeId, visitId, metadata = {}) {
+export async function moveStopToRoute(routeId, visitId, metadata = {}) {
   removeVisitFromAllRoutes(visitId);
   const route = moveStopToRouteRecord(routeId, visitId, {
     ...metadata,
@@ -88,7 +88,7 @@ export function moveStopToRoute(routeId, visitId, metadata = {}) {
   });
 
   if (route) {
-    assignVisitToRoute(visitId, route, {
+    await assignVisitToRoute(visitId, route, {
       action: 'visit:assign-route-from-move',
       eventAction: 'assign-route-from-move',
       route_id: route.route_id

@@ -57,7 +57,7 @@ localStorage.setItem = function setItemWithActualCompletionTracking(key, value) 
         completed_date: visit.completed_date,
         action: 'visit:actual-completion-tracking',
         eventAction: 'actual-completion-tracking'
-      });
+      }).catch(() => {});
     });
   } catch {
     originalSetItem(key, value);

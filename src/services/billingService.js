@@ -19,7 +19,7 @@ function getPropertyMap(properties) {
   return Object.fromEntries((properties || []).map((property) => [property.property_id, property]));
 }
 
-export function generateInvoicesForVisits(visitIds, metadata = {}) {
+export async function generateInvoicesForVisits(visitIds, metadata = {}) {
   const selectedVisitIds = new Set(visitIds);
   const state = readState();
   const properties = listProperties();
@@ -86,13 +86,13 @@ export function generateInvoicesForVisits(visitIds, metadata = {}) {
     eventAction: metadata.eventAction || 'billing-create-selected-invoices'
   });
 
-  touchedVisitIds.forEach((visitId) => {
-    updateVisit(visitId, { status: 'billed' }, {
+  for (const visitId of touchedVisitIds) {
+    await updateVisit(visitId, { status: 'billed' }, {
       ...metadata,
       action: 'billing:mark-visit-billed',
       eventAction: 'mark-billed'
     });
-  });
+  }
 
   const summary = {
     createdCount: createdInvoices.length,
@@ -111,7 +111,7 @@ export function generateInvoicesForVisits(visitIds, metadata = {}) {
   return summary;
 }
 
-export function generateInvoicesForDateRange(startDate, endDate, metadata = {}) {
+export async function generateInvoicesForDateRange(startDate, endDate, metadata = {}) {
   const properties = listProperties();
   const visits = listVisits();
   const propertyMap = getPropertyMap(properties);

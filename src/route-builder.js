@@ -205,7 +205,7 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
   const form = document.querySelector('#route-builder-form');
   if (!form) return;
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     const formData = new FormData(form);
@@ -218,7 +218,7 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
 
     if (!routeName || selectedVisitIds.length === 0) return;
 
-    const result = saveRouteWithStops(
+    const result = await saveRouteWithStops(
       {
       company_id: state.company?.company_id,
       name: routeName,
@@ -234,22 +234,22 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
   });
 
   document.querySelectorAll('[data-route-remove-stop]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const visitId = button.dataset.routeRemoveStop;
-      Object.assign(state, removeStopFromRoutes(visitId));
+      Object.assign(state, await removeStopFromRoutes(visitId));
       render();
     });
   });
 
   document.querySelectorAll('[data-route-move-stop]').forEach((button) => {
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       const visitId = button.dataset.routeMoveStop;
       const targetSelect = document.querySelector(`[data-route-target="${visitId}"]`);
       const targetRouteId = targetSelect?.value;
       const targetRoute = (state.routes || []).find((route) => route.route_id === targetRouteId);
       if (!visitId || !targetRoute) return;
 
-      Object.assign(state, moveStopToRoute(targetRoute.route_id, visitId));
+      Object.assign(state, await moveStopToRoute(targetRoute.route_id, visitId));
       render();
     });
   });

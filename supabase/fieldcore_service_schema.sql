@@ -183,20 +183,37 @@ create table if not exists public.visits (
   status text not null default 'scheduled',
   notes text,
   started_at timestamptz,
-  route_id text references public.routes(route_id) on delete set null,
+  route_id text,
   route_name text,
   route_day text,
   assigned_worker text,
+  worker_name text,
+  crew_name text,
   completed_at timestamptz,
   completed_date date,
   completed_late boolean not null default false,
   skip_reason text,
   skipped_at timestamptz,
+  rescheduled_to date,
+  recurring_generated boolean not null default false,
+  holiday_conflict boolean not null default false,
+  holiday_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint visits_price_check check (price >= 0),
   constraint visits_status_check check (status in ('scheduled', 'in-progress', 'completed', 'skipped', 'billed'))
 );
+
+alter table public.visits
+  drop constraint if exists visits_route_id_fkey;
+
+alter table public.visits
+  add column if not exists worker_name text,
+  add column if not exists crew_name text,
+  add column if not exists rescheduled_to date,
+  add column if not exists recurring_generated boolean not null default false,
+  add column if not exists holiday_conflict boolean not null default false,
+  add column if not exists holiday_name text;
 
 create table if not exists public.route_stops (
   route_stop_id text primary key default ('rs_' || replace(gen_random_uuid()::text, '-', '')),

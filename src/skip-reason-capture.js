@@ -73,7 +73,7 @@ function bindSkipReasonModalEvents() {
 
   document.querySelector('[data-cancel-skip-reason]')?.addEventListener('click', closeSkipReasonModal);
 
-  document.querySelector('[data-confirm-skip-reason]')?.addEventListener('click', () => {
+  document.querySelector('[data-confirm-skip-reason]')?.addEventListener('click', async () => {
     if (!pendingSkip) return;
 
     const selectedReason = select?.value || '';
@@ -85,7 +85,7 @@ function bindSkipReasonModalEvents() {
       return;
     }
 
-    updateSkipReason(pendingSkip.visitId, skipReason);
+    await updateSkipReason(pendingSkip.visitId, skipReason);
     closeSkipReasonModal();
   });
 }

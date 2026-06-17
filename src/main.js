@@ -178,7 +178,7 @@ function buildCustomerTimeline(customerId, customerMap, propertyMap) {
   });
 }
 
-function ensureRouteVisitsForDate(targetDate) {
+async function ensureRouteVisitsForDate(targetDate) {
   const customerMap = getCustomerMap(state);
   const recurringFrequencies = new Set(['weekly', 'biweekly', 'monthly']);
   const newVisits = [];
@@ -190,7 +190,7 @@ function ensureRouteVisitsForDate(targetDate) {
     if (exists) return;
     newVisits.push({ visit_id: makeId('visit'), company_id: state.company.company_id, property_id: property.property_id, visit_date: targetDate, service_description: `${property.recurring_frequency} ${property.service_type.toLowerCase()} service`, price: property.default_price, status: 'scheduled', notes: property.notes || 'Auto-generated recurring visit.', created_at: new Date().toISOString() });
   });
-  const createdVisits = bulkCreateVisits(newVisits, {
+  const createdVisits = await bulkCreateVisits(newVisits, {
     action: 'visit:create-route-date-generated',
     eventAction: 'route-date-generated'
   });
@@ -237,7 +237,7 @@ function renderPropertyQuickActionCards(properties, customerMap) {
   return properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p><div class="actions"><button data-service-schedule="${p.property_id}">Schedule Visit</button><button data-service-pause="${p.property_id}">Pause Service</button><button data-service-frequency="${p.property_id}">Change Frequency</button><button data-service-price="${p.property_id}">Adjust Price</button></div></article>`).join('');
 }
 
-function render() {
+async function render() {
   currentSession = getSession();
   if (!currentSession) {
     renderLogin();
@@ -251,7 +251,7 @@ function render() {
   }
 
   if (activeView === 'today-route' && !showOverdueRoute) {
-    ensureRouteVisitsForDate(selectedRouteDate);
+    await ensureRouteVisitsForDate(selectedRouteDate);
   }
 
   const customerMap = getCustomerMap(state);
@@ -397,10 +397,10 @@ function renderWorkerRoute(session) {
   `;
 }
 
-function updateWorkerVisitStatus(visitId, action) {
-  if (action === 'start') startVisit(visitId, { source: 'worker-route' });
-  if (action === 'complete') completeVisit(visitId, { source: 'worker-route' });
-  if (action === 'skip') skipVisit(visitId, { source: 'worker-route' });
+async function updateWorkerVisitStatus(visitId, action) {
+  if (action === 'start') await startVisit(visitId, { source: 'worker-route' });
+  if (action === 'complete') await completeVisit(visitId, { source: 'worker-route' });
+  if (action === 'skip') await skipVisit(visitId, { source: 'worker-route' });
   state = loadState();
 }
 
@@ -654,15 +654,15 @@ function bindEvents() {
   const serviceForm = app.querySelector('#service-form');
   if (serviceForm && selectedCustomerId) serviceForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(serviceForm); await createProperty({ customer_id: selectedCustomerId, service_address: formData.get('service_address'), service_type: formData.get('service_type'), recurring_frequency: formData.get('recurring_frequency'), default_price: Number(formData.get('default_price') || 0), status: 'active', notes: formData.get('notes') || '' }); state = loadState(); flashMessage = 'Service added.'; render(); });
   const oneOffForm = app.querySelector('#one-off-form');
-  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(oneOffForm); scheduleOneOffVisit({ company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job' }); state = loadState(); flashMessage = 'One-off job scheduled.'; render(); });
-  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; scheduleVisit({ company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes }); state = loadState(); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
+  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(oneOffForm); await scheduleOneOffVisit({ company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job' }); state = loadState(); flashMessage = 'One-off job scheduled.'; render(); });
+  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; await scheduleVisit({ company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes }); state = loadState(); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
   app.querySelectorAll('[data-service-pause]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.servicePause; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Pause service at ${property.service_address}?`)) return; await pausePropertyService(propertyId); state = loadState(); flashMessage = 'Service paused.'; render(); }));
   app.querySelectorAll('[data-service-frequency]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceFrequency; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; await updatePropertyFrequency(propertyId, frequency); state = loadState(); flashMessage = 'Service frequency updated.'; render(); }));
   app.querySelectorAll('[data-service-price]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.servicePrice; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; await updatePropertyPrice(propertyId, Number(price || 0)); state = loadState(); flashMessage = 'Service price updated.'; render(); }));
   app.querySelectorAll('[data-service-edit]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceEdit; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const serviceType = window.prompt('Service type:', property.service_type); if (!serviceType) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; const notes = window.prompt('Notes:', property.notes || ''); if (notes === null) return; const status = window.prompt('Status (active or inactive):', property.status || 'active'); if (!status) return; await updateProperty(propertyId, { service_type: serviceType, recurring_frequency: frequency, default_price: Number(price || 0), notes, status }); state = loadState(); flashMessage = 'Service updated.'; render(); }));
   app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; await removePropertyService(propertyId); state = loadState(); flashMessage = 'Service removed from active work.'; render(); }));
   const batchForm = app.querySelector('#batch-form');
-  if (batchForm) batchForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = generateInvoicesForDateRange(formData.get('start'), formData.get('end'), { source: 'batch-form' }); state = loadState(); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
+  if (batchForm) batchForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = await generateInvoicesForDateRange(formData.get('start'), formData.get('end'), { source: 'batch-form' }); state = loadState(); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
   app.querySelectorAll('[data-billing-visit]').forEach((checkbox) => checkbox.addEventListener('change', () => {
     if (checkbox.checked) billingSelectedVisitIds.add(checkbox.dataset.billingVisit);
     else billingSelectedVisitIds.delete(checkbox.dataset.billingVisit);
@@ -690,8 +690,8 @@ function bindEvents() {
     render();
   });
   const billingGenerate = app.querySelector('[data-billing-generate]');
-  if (billingGenerate) billingGenerate.addEventListener('click', () => {
-    const summary = generateInvoicesForVisits([...billingSelectedVisitIds], { source: 'ready-to-bill' });
+  if (billingGenerate) billingGenerate.addEventListener('click', async () => {
+    const summary = await generateInvoicesForVisits([...billingSelectedVisitIds], { source: 'ready-to-bill' });
     billingSelectedVisitIds = new Set();
     state = loadState();
     flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} selected visits.`;
@@ -709,9 +709,9 @@ function bindEvents() {
   if (activeView === 'employees') {
     bindEmployeeEvents(reloadStateAndRender);
   }
-  app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', () => {
+  app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', async () => {
     const [visitId, action] = button.dataset.workerAction.split(':');
-    updateWorkerVisitStatus(visitId, action);
+    await updateWorkerVisitStatus(visitId, action);
     if (action === 'start') flashMessage = 'Stop started.';
     if (action === 'complete') flashMessage = 'Stop completed.';
     if (action === 'skip') flashMessage = 'Stop skipped.';
@@ -741,7 +741,7 @@ async function initializeApp() {
   }
   state = loadState();
   currentSession = getSession();
-  render();
+  await render();
 }
 
 if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });

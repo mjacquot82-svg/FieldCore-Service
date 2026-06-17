@@ -254,17 +254,17 @@ function refreshTodayRouteFlow() {
   enhanceTodayRoute(true);
 }
 
-function completeRouteVisit(visitId) {
-  completeVisit(visitId, { source: 'today-route-flow' });
+async function completeRouteVisit(visitId) {
+  await completeVisit(visitId, { source: 'today-route-flow' });
   refreshTodayRouteFlow();
 }
 
-function skipRouteVisit(visitId, metadata = {}) {
-  skipVisit(visitId, { source: 'today-route-flow', ...metadata });
+async function skipRouteVisit(visitId, metadata = {}) {
+  await skipVisit(visitId, { source: 'today-route-flow', ...metadata });
   refreshTodayRouteFlow();
 }
 
-function skipAndRescheduleVisit(visitId) {
+async function skipAndRescheduleVisit(visitId) {
   const state = loadState();
   if (!state) return;
 
@@ -274,7 +274,7 @@ function skipAndRescheduleVisit(visitId) {
   const nextDate = window.prompt('Reschedule date (YYYY-MM-DD):', visit.visit_date || new Date().toISOString().slice(0, 10));
   if (!nextDate) return;
 
-  rescheduleVisit(visitId, nextDate, { source: 'today-route-flow' });
+  await rescheduleVisit(visitId, nextDate, { source: 'today-route-flow' });
   refreshTodayRouteFlow();
 }
 
@@ -283,7 +283,7 @@ function goToReadyToBill() {
   document.querySelector('[data-nav="batch"]')?.click();
 }
 
-function handleFlowClick(event) {
+async function handleFlowClick(event) {
   const createInvoicesButton = event.target.closest('[data-flow-create-invoices]');
   if (createInvoicesButton) {
     event.preventDefault();
@@ -309,9 +309,9 @@ function handleFlowClick(event) {
   const [visitId, action] = button.dataset.flowVisitAction.split(':');
   if (!visitId || !action) return;
 
-  if (action === 'complete') completeRouteVisit(visitId);
-  if (action === 'skip') skipRouteVisit(visitId);
-  if (action === 'skip-reschedule') skipAndRescheduleVisit(visitId);
+  if (action === 'complete') await completeRouteVisit(visitId);
+  if (action === 'skip') await skipRouteVisit(visitId);
+  if (action === 'skip-reschedule') await skipAndRescheduleVisit(visitId);
 }
 
 let scheduled = false;

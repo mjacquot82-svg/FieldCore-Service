@@ -20,13 +20,13 @@ export function resetSeed() {
 
 export { getCustomerMap, getPropertyMap };
 
-export function generateBatchInvoices(state, startDate, endDate) {
+export async function generateBatchInvoices(state, startDate, endDate) {
   return generateInvoicesForDateRange(startDate, endDate, {
     source: 'store-compat'
   });
 }
 
-export function generateSelectedVisitInvoices(state, visitIds) {
+export async function generateSelectedVisitInvoices(state, visitIds) {
   return generateInvoicesForVisits(visitIds, {
     source: 'store-compat'
   });

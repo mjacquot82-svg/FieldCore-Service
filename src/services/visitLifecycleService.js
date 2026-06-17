@@ -26,9 +26,9 @@ function emitLifecycleEvent(eventName, visit, metadata) {
   });
 }
 
-export function startVisit(visitId, metadata = {}) {
+export async function startVisit(visitId, metadata = {}) {
   const startedAt = metadata.started_at || nowIso();
-  const visit = updateVisitStatus(
+  const visit = await updateVisitStatus(
     visitId,
     'in-progress',
     { started_at: startedAt },
@@ -45,11 +45,11 @@ export function startVisit(visitId, metadata = {}) {
   return visit;
 }
 
-export function completeVisit(visitId, metadata = {}) {
+export async function completeVisit(visitId, metadata = {}) {
   const existingVisit = getVisit(visitId);
   if (!existingVisit) return null;
 
-  const visit = updateVisitStatus(
+  const visit = await updateVisitStatus(
     visitId,
     'completed',
     {},
@@ -62,7 +62,7 @@ export function completeVisit(visitId, metadata = {}) {
 
   if (!visit) return null;
 
-  const completedVisit = updateCompletionMetadata(visitId, {
+  const completedVisit = await updateCompletionMetadata(visitId, {
     ...metadata,
     completed_at: metadata.completed_at || nowIso(),
     completed_date: metadata.completed_date || today(),
@@ -74,7 +74,7 @@ export function completeVisit(visitId, metadata = {}) {
   return completedVisit;
 }
 
-export function skipVisit(visitId, metadata = {}) {
+export async function skipVisit(visitId, metadata = {}) {
   const skippedAt = metadata.skipped_at || nowIso();
   const skipPatch = { skipped_at: skippedAt };
 
@@ -82,7 +82,7 @@ export function skipVisit(visitId, metadata = {}) {
     skipPatch.rescheduled_to = metadata.rescheduled_to;
   }
 
-  const visit = updateVisitStatus(
+  const visit = await updateVisitStatus(
     visitId,
     'skipped',
     skipPatch,
@@ -99,11 +99,11 @@ export function skipVisit(visitId, metadata = {}) {
   return visit;
 }
 
-export function skipAndRescheduleVisit(visitId, nextDate, metadata = {}) {
+export async function skipAndRescheduleVisit(visitId, nextDate, metadata = {}) {
   const existingVisit = getVisit(visitId);
   if (!existingVisit || !nextDate) return null;
 
-  const skippedVisit = skipVisit(visitId, {
+  const skippedVisit = await skipVisit(visitId, {
     ...metadata,
     rescheduled_to: nextDate
   });
@@ -125,7 +125,7 @@ export function skipAndRescheduleVisit(visitId, nextDate, metadata = {}) {
   delete replacementVisit.skipped_at;
   delete replacementVisit.rescheduled_to;
 
-  const newVisit = scheduleVisit(replacementVisit, {
+  const newVisit = await scheduleVisit(replacementVisit, {
     ...metadata,
     action: metadata.createAction || 'visit:lifecycle-reschedule-create',
     eventAction: metadata.createEventAction || 'lifecycle-reschedule-create',
