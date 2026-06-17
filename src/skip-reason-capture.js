@@ -1,3 +1,5 @@
+import { updateSkipReason } from './data/repositories/visitRepository.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SKIP_REASONS = [
   'Rain / weather',
@@ -16,10 +18,6 @@ function loadState() {
   } catch {
     return null;
   }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function getVisitIdFromButton(button) {
@@ -87,20 +85,7 @@ function bindSkipReasonModalEvents() {
       return;
     }
 
-    const state = loadState();
-    if (!state) return;
-
-    state.visits = (state.visits || []).map((visit) => {
-      if (visit.visit_id !== pendingSkip.visitId) return visit;
-
-      return {
-        ...visit,
-        skip_reason: skipReason,
-        skipped_at: new Date().toISOString()
-      };
-    });
-
-    saveState(state);
+    updateSkipReason(pendingSkip.visitId, skipReason);
     closeSkipReasonModal();
   });
 }

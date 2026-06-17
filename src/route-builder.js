@@ -1,4 +1,9 @@
 import { getCustomerMap, getPropertyMap } from './lib/store.js';
+import {
+  assignVisitToRoute,
+  clearVisitRouteAssignment,
+  listVisits
+} from './data/repositories/visitRepository.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -50,20 +55,9 @@ function removeVisitFromRoutes(routes = [], visitId) {
 }
 
 function updateVisitRoute(state, visitId, route) {
-  state.visits = (state.visits || []).map((visit) => {
-    if (visit.visit_id !== visitId) return visit;
-    if (!route) {
-      const { route_id, route_name, route_day, assigned_worker, ...unassignedVisit } = visit;
-      return unassignedVisit;
-    }
-    return {
-      ...visit,
-      route_id: route.route_id,
-      route_name: route.name,
-      route_day: route.route_day,
-      assigned_worker: route.assigned_worker
-    };
-  });
+  if (!route) clearVisitRouteAssignment(visitId);
+  else assignVisitToRoute(visitId, route);
+  state.visits = listVisits();
 }
 
 function renderRouteStat(label, value) {

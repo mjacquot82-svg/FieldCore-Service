@@ -26,6 +26,11 @@ import {
   updatePropertyFrequency,
   updatePropertyPrice
 } from './data/repositories/propertyRepository.js';
+import {
+  bulkCreateVisits,
+  scheduleOneOffVisit,
+  scheduleVisit
+} from './data/repositories/visitRepository.js';
 
 const app = document.querySelector('#app');
 let state = loadState();
@@ -183,8 +188,12 @@ function ensureRouteVisitsForDate(targetDate) {
     if (exists) return;
     newVisits.push({ visit_id: makeId('visit'), company_id: state.company.company_id, property_id: property.property_id, visit_date: targetDate, service_description: `${property.recurring_frequency} ${property.service_type.toLowerCase()} service`, price: property.default_price, status: 'scheduled', notes: property.notes || 'Auto-generated recurring visit.', created_at: new Date().toISOString() });
   });
-  if (newVisits.length) state.visits = [...state.visits, ...newVisits];
-  return newVisits.length;
+  const createdVisits = bulkCreateVisits(newVisits, {
+    action: 'visit:create-route-date-generated',
+    eventAction: 'route-date-generated'
+  });
+  if (createdVisits.length) state = loadState();
+  return createdVisits.length;
 }
 
 function getScheduledVisitsForProperty(propertyId) {
@@ -240,8 +249,7 @@ function render() {
   }
 
   if (activeView === 'today-route' && !showOverdueRoute) {
-    const createdCount = ensureRouteVisitsForDate(selectedRouteDate);
-    if (createdCount > 0) saveState(state);
+    ensureRouteVisitsForDate(selectedRouteDate);
   }
 
   const customerMap = getCustomerMap(state);
@@ -644,8 +652,8 @@ function bindEvents() {
   const serviceForm = app.querySelector('#service-form');
   if (serviceForm && selectedCustomerId) serviceForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(serviceForm); createProperty({ customer_id: selectedCustomerId, service_address: formData.get('service_address'), service_type: formData.get('service_type'), recurring_frequency: formData.get('recurring_frequency'), default_price: Number(formData.get('default_price') || 0), status: 'active', notes: formData.get('notes') || '' }); state = loadState(); flashMessage = 'Service added.'; render(); });
   const oneOffForm = app.querySelector('#one-off-form');
-  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(oneOffForm); state.visits = [...state.visits, { visit_id: makeId('visit'), company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job', created_at: new Date().toISOString() }]; saveState(state); flashMessage = 'One-off job scheduled.'; render(); });
-  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; state.visits = [...state.visits, { visit_id: makeId('visit'), company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes, created_at: new Date().toISOString() }]; saveState(state); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
+  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', (event) => { event.preventDefault(); const formData = new FormData(oneOffForm); scheduleOneOffVisit({ company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job' }); state = loadState(); flashMessage = 'One-off job scheduled.'; render(); });
+  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; scheduleVisit({ company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes }); state = loadState(); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
   app.querySelectorAll('[data-service-pause]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.servicePause; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Pause service at ${property.service_address}?`)) return; pausePropertyService(propertyId); state = loadState(); flashMessage = 'Service paused.'; render(); }));
   app.querySelectorAll('[data-service-frequency]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.serviceFrequency; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; updatePropertyFrequency(propertyId, frequency); state = loadState(); flashMessage = 'Service frequency updated.'; render(); }));
   app.querySelectorAll('[data-service-price]').forEach((button) => button.addEventListener('click', () => { const propertyId = button.dataset.servicePrice; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; updatePropertyPrice(propertyId, Number(price || 0)); state = loadState(); flashMessage = 'Service price updated.'; render(); }));

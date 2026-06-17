@@ -1,5 +1,10 @@
 import { emit } from '../data/appEventBus.js';
-import { createVisit, getVisit, updateVisitStatus } from '../data/repositories/visitRepository.js';
+import {
+  getVisit,
+  scheduleVisit,
+  updateCompletionMetadata,
+  updateVisitStatus
+} from '../data/repositories/visitRepository.js';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -44,16 +49,10 @@ export function completeVisit(visitId, metadata = {}) {
   const existingVisit = getVisit(visitId);
   if (!existingVisit) return null;
 
-  const completedDate = metadata.completed_date || today();
-  const completedAt = metadata.completed_at || nowIso();
   const visit = updateVisitStatus(
     visitId,
     'completed',
-    {
-      completed_at: existingVisit.completed_at || completedAt,
-      completed_date: existingVisit.completed_date || completedDate,
-      completed_late: Boolean(existingVisit.visit_date && existingVisit.visit_date < completedDate)
-    },
+    {},
     {
       ...metadata,
       action: metadata.action || 'visit:lifecycle-complete',
@@ -63,8 +62,16 @@ export function completeVisit(visitId, metadata = {}) {
 
   if (!visit) return null;
 
-  emitLifecycleEvent('visit:completed', visit, metadata);
-  return visit;
+  const completedVisit = updateCompletionMetadata(visitId, {
+    ...metadata,
+    completed_at: metadata.completed_at || nowIso(),
+    completed_date: metadata.completed_date || today(),
+    action: 'visit:lifecycle-completion-metadata',
+    eventAction: 'lifecycle-completion-metadata'
+  }) || visit;
+
+  emitLifecycleEvent('visit:completed', completedVisit, metadata);
+  return completedVisit;
 }
 
 export function skipVisit(visitId, metadata = {}) {
@@ -118,7 +125,7 @@ export function skipAndRescheduleVisit(visitId, nextDate, metadata = {}) {
   delete replacementVisit.skipped_at;
   delete replacementVisit.rescheduled_to;
 
-  const newVisit = createVisit(replacementVisit, {
+  const newVisit = scheduleVisit(replacementVisit, {
     ...metadata,
     action: metadata.createAction || 'visit:lifecycle-reschedule-create',
     eventAction: metadata.createEventAction || 'lifecycle-reschedule-create',

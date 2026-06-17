@@ -1,3 +1,5 @@
+import { bulkCreateVisits } from './data/repositories/visitRepository.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const GENERATE_DAYS = 30;
 
@@ -240,8 +242,10 @@ function generateUpcomingVisits(propertyId) {
       };
     });
 
-  state.visits = [...(state.visits || []), ...newVisits];
-  saveState(state);
+  bulkCreateVisits(newVisits, {
+    action: 'visit:create-recurring-generated',
+    eventAction: 'recurring-generated'
+  });
   window.alert(`Generated ${createdCount} upcoming visit${createdCount === 1 ? '' : 's'} for the next ${GENERATE_DAYS} days.`);
   window.location.reload();
 }
