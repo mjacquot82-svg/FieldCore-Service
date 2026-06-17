@@ -46,6 +46,10 @@ function cloneOrNull(value) {
   return value ? clone(value) : null;
 }
 
+function makeCustomerId() {
+  return `cust_${crypto.randomUUID().slice(0, 8)}`;
+}
+
 function pickAllowedFields(patch, allowedFields) {
   return allowedFields.reduce((nextPatch, field) => {
     if (Object.prototype.hasOwnProperty.call(patch, field)) {
@@ -55,7 +59,39 @@ function pickAllowedFields(patch, allowedFields) {
   }, {});
 }
 
-function updateCustomer(customerId, patch, metadata) {
+export function createCustomer(customerInput = {}) {
+  const state = readState();
+  const customer = {
+    customer_id: customerInput.customer_id || makeCustomerId(),
+    company_id: customerInput.company_id || state.company?.company_id,
+    name: customerInput.name || '',
+    phone: customerInput.phone || '',
+    email: customerInput.email || '',
+    billing_address: customerInput.billing_address || '',
+    status: customerInput.status || 'active',
+    created_at: customerInput.created_at || new Date().toISOString()
+  };
+
+  const nextState = {
+    ...state,
+    customers: [...(state.customers || []), customer]
+  };
+
+  writeState(nextState, {
+    action: 'customer:create',
+    customer_id: customer.customer_id
+  });
+
+  emit('customers:changed', {
+    action: 'create',
+    customer_id: customer.customer_id,
+    customer: clone(customer)
+  });
+
+  return clone(customer);
+}
+
+export function updateCustomer(customerId, patch = {}, metadata = {}) {
   const state = readState();
   let updatedCustomer = null;
 
@@ -75,16 +111,29 @@ function updateCustomer(customerId, patch, metadata) {
 
   writeState(nextState, {
     ...metadata,
+    action: metadata.action || 'customer:update',
     customer_id: customerId
   });
 
   emit('customers:changed', {
-    action: metadata.action,
+    action: metadata.eventAction || metadata.action || 'update',
     customer_id: customerId,
     customer: clone(updatedCustomer)
   });
 
   return clone(updatedCustomer);
+}
+
+export function deactivateCustomer(customerId, metadata = {}) {
+  return updateCustomer(
+    customerId,
+    { status: 'inactive' },
+    {
+      ...metadata,
+      action: metadata.action || 'customer:deactivate',
+      eventAction: metadata.eventAction || 'deactivate'
+    }
+  );
 }
 
 function listLocalCustomers() {
