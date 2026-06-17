@@ -1,9 +1,9 @@
 import { getCustomerMap, getPropertyMap } from './lib/store.js';
 import {
-  assignVisitToRoute,
-  clearVisitRouteAssignment,
-  listVisits
-} from './data/repositories/visitRepository.js';
+  moveStopToRoute,
+  removeStopFromRoutes,
+  saveRouteWithStops
+} from './services/routeService.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -11,7 +11,6 @@ const currency = (amount) => new Intl.NumberFormat('en-US', {
 }).format(amount || 0);
 
 const today = () => new Date().toISOString().slice(0, 10);
-const makeRouteId = () => `route_${crypto.randomUUID().slice(0, 8)}`;
 const routeDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function weekdayForDate(date) {
@@ -45,19 +44,6 @@ function getRouteAssignmentMap(routes = []) {
 function routeLabel(route) {
   const worker = route.assigned_worker || 'Unassigned worker';
   return `${worker} - ${route.name}`;
-}
-
-function removeVisitFromRoutes(routes = [], visitId) {
-  return routes.map((route) => ({
-    ...route,
-    visit_ids: (route.visit_ids || []).filter((id) => id !== visitId)
-  }));
-}
-
-function updateVisitRoute(state, visitId, route) {
-  if (!route) clearVisitRouteAssignment(visitId);
-  else assignVisitToRoute(visitId, route);
-  state.visits = listVisits();
 }
 
 function renderRouteStat(label, value) {
@@ -232,42 +218,25 @@ export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, 
 
     if (!routeName || selectedVisitIds.length === 0) return;
 
-    const existingRoute = (state.routes || []).find((route) =>
-      route.route_date === routeDate &&
-      route.route_day === routeDay &&
-      route.name === routeName &&
-      (route.assigned_worker || '') === assignedWorker
-    );
-    const route = existingRoute || {
-      route_id: makeRouteId(),
+    const result = saveRouteWithStops(
+      {
       company_id: state.company?.company_id,
       name: routeName,
       route_day: routeDay,
       route_date: routeDate,
-      assigned_worker: assignedWorker,
-      visit_ids: [],
-      created_at: new Date().toISOString()
-    };
+        assigned_worker: assignedWorker
+      },
+      selectedVisitIds
+    );
 
-    state.routes = existingRoute
-      ? (state.routes || []).map((savedRoute) => savedRoute.route_id === route.route_id
-        ? { ...savedRoute, visit_ids: [...new Set([...(savedRoute.visit_ids || []), ...selectedVisitIds])] }
-        : savedRoute)
-      : [...(state.routes || []), { ...route, visit_ids: selectedVisitIds }];
-
-    const savedRoute = (state.routes || []).find((saved) => saved.route_id === route.route_id);
-    selectedVisitIds.forEach((visitId) => updateVisitRoute(state, visitId, savedRoute));
-
-    saveStateFn(state);
+    if (result?.state) Object.assign(state, result.state);
     render();
   });
 
   document.querySelectorAll('[data-route-remove-stop]').forEach((button) => {
     button.addEventListener('click', () => {
       const visitId = button.dataset.routeRemoveStop;
-      state.routes = removeVisitFromRoutes(state.routes || [], visitId);
-      updateVisitRoute(state, visitId, null);
-      saveStateFn(state);
+      Object.assign(state, removeStopFromRoutes(visitId));
       render();
     });
   });
@@ -280,12 +249,7 @@ export function bindRouteBuilderEvents(state, saveStateFn, setRouteBuilderDate, 
       const targetRoute = (state.routes || []).find((route) => route.route_id === targetRouteId);
       if (!visitId || !targetRoute) return;
 
-      state.routes = removeVisitFromRoutes(state.routes || [], visitId).map((route) => route.route_id === targetRoute.route_id
-        ? { ...route, visit_ids: [...new Set([...(route.visit_ids || []), visitId])] }
-        : route);
-      const updatedTargetRoute = (state.routes || []).find((route) => route.route_id === targetRoute.route_id);
-      updateVisitRoute(state, visitId, updatedTargetRoute);
-      saveStateFn(state);
+      Object.assign(state, moveStopToRoute(targetRoute.route_id, visitId));
       render();
     });
   });

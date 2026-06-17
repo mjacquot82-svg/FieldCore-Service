@@ -1,34 +1,8 @@
-const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
-
-function loadState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
+import { reorderRouteStops } from './services/routeService.js';
 
 function moveVisit(direction, visitId) {
-  const state = loadState();
+  const state = reorderRouteStops(visitId, direction);
   if (!state) return;
-
-  const visits = [...(state.visits || [])];
-  const index = visits.findIndex(v => v.visit_id === visitId);
-  if (index === -1) return;
-
-  const swapIndex = direction === 'up' ? index - 1 : index + 1;
-  if (swapIndex < 0 || swapIndex >= visits.length) return;
-
-  const temp = visits[index];
-  visits[index] = visits[swapIndex];
-  visits[swapIndex] = temp;
-
-  state.visits = visits;
-  saveState(state);
   location.reload();
 }
 
