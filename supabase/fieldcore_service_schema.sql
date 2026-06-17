@@ -165,6 +165,7 @@ create table if not exists public.routes (
   route_date date not null,
   assigned_worker text,
   employee_id text references public.employees(employee_id) on delete set null,
+  visit_ids jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint routes_route_day_check check (
@@ -172,6 +173,9 @@ create table if not exists public.routes (
   ),
   constraint routes_unique_route_key unique (company_id, route_date, route_day, name, assigned_worker)
 );
+
+alter table public.routes
+  add column if not exists visit_ids jsonb not null default '[]'::jsonb;
 
 create table if not exists public.visits (
   visit_id text primary key default ('visit_' || replace(gen_random_uuid()::text, '-', '')),

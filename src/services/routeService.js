@@ -21,26 +21,26 @@ function findMatchingRoute(routes, routeInput) {
   );
 }
 
-function removeVisitFromAllRoutes(visitId) {
-  listRoutes().forEach((route) => {
+async function removeVisitFromAllRoutes(visitId) {
+  for (const route of listRoutes()) {
     if ((route.visit_ids || []).includes(visitId)) {
-      removeStopFromRoute(route.route_id, visitId, {
+      await removeStopFromRoute(route.route_id, visitId, {
         action: 'route:remove-stop-for-move',
         eventAction: 'remove-stop-for-move'
       });
     }
-  });
+  }
 }
 
 export async function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
   const existingRoute = findMatchingRoute(listRoutes(), routeInput);
   const route = existingRoute
-    ? addStopsToRoute(existingRoute.route_id, visitIds, {
+    ? await addStopsToRoute(existingRoute.route_id, visitIds, {
         ...metadata,
         action: 'route:update-stops',
         eventAction: 'update-stops'
       })
-    : createRoute(
+    : await createRoute(
         {
           ...routeInput,
           visit_ids: visitIds
@@ -69,7 +69,7 @@ export async function saveRouteWithStops(routeInput, visitIds = [], metadata = {
 }
 
 export async function removeStopFromRoutes(visitId, metadata = {}) {
-  removeVisitFromAllRoutes(visitId);
+  await removeVisitFromAllRoutes(visitId);
   await clearVisitRouteAssignment(visitId, {
     ...metadata,
     action: 'visit:clear-route-from-route-service',
@@ -80,8 +80,8 @@ export async function removeStopFromRoutes(visitId, metadata = {}) {
 }
 
 export async function moveStopToRoute(routeId, visitId, metadata = {}) {
-  removeVisitFromAllRoutes(visitId);
-  const route = moveStopToRouteRecord(routeId, visitId, {
+  await removeVisitFromAllRoutes(visitId);
+  const route = await moveStopToRouteRecord(routeId, visitId, {
     ...metadata,
     action: 'route:move-stop-to-route',
     eventAction: 'move-stop-to-route'

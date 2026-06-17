@@ -1,6 +1,7 @@
 import { syncEmployeesFromSupabase } from './repositories/employeeRepository.js';
 import { syncCustomersFromSupabase } from './repositories/customerRepository.js';
 import { syncPropertiesFromSupabase } from './repositories/propertyRepository.js';
+import { syncRoutesFromSupabase } from './repositories/routeRepository.js';
 import { syncSettingsFromSupabase } from './repositories/settingsRepository.js';
 import { syncVisitsFromSupabase } from './repositories/visitRepository.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
@@ -15,14 +16,16 @@ export async function syncFoundationFromSupabase() {
   const customers = await syncCustomersFromSupabase();
   const properties = await syncPropertiesFromSupabase();
   const visits = await syncVisitsFromSupabase();
+  const routes = await syncRoutesFromSupabase();
 
   return {
     configured: true,
-    synced: Boolean(settings || employees || customers || properties || visits),
+    synced: Boolean(settings || employees || customers || properties || visits || routes),
     settings: Boolean(settings),
     employees: Boolean(employees),
     customers: Boolean(customers),
     properties: Boolean(properties),
-    visits: Boolean(visits)
+    visits: Boolean(visits),
+    routes: Boolean(routes)
   };
 }
