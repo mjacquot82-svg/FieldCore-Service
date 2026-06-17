@@ -91,6 +91,21 @@ async function readSupabaseMemberships(companyId) {
   return clone(response.data);
 }
 
+async function readSupabaseMembershipForUser(companyId, userId) {
+  if (!companyId || !userId) return null;
+
+  const response = await supabaseSelect('company_memberships', {
+    select: MEMBERSHIP_SELECT_FIELDS,
+    company_id: `eq.${companyId}`,
+    user_id: `eq.${userId}`,
+    status: 'eq.active',
+    limit: '1'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return response.data[0] ? clone(response.data[0]) : null;
+}
+
 async function writeSupabaseMembership(membership) {
   const state = readState();
   const record = normalizeMembershipForSupabase(membership);
@@ -156,6 +171,19 @@ export function listCompanyMemberships() {
   return clone(localMemberships());
 }
 
+export async function getCompanyMembershipForUser(userId, companyId = readState().company?.company_id) {
+  const remoteMembership = await readSupabaseMembershipForUser(companyId, userId);
+  if (remoteMembership) return remoteMembership;
+
+  const localMembership = localMemberships().find((membership) =>
+    membership.company_id === companyId &&
+    membership.user_id === userId &&
+    membership.status === 'active'
+  );
+
+  return localMembership ? clone(localMembership) : null;
+}
+
 export async function ensureDefaultOwnerMembership(metadata = {}) {
   const state = readState();
   const existingOwner = localMemberships().find((membership) =>
@@ -177,6 +205,57 @@ export async function ensureDefaultOwnerMembership(metadata = {}) {
 
   emit('company-memberships:changed', {
     action: 'ensure-default-owner',
+    membership_id: persistedMembership.membership_id,
+    membership: clone(persistedMembership),
+    metadata: clone(metadata)
+  });
+
+  return clone(persistedMembership);
+}
+
+export async function attachOwnerMembershipToUser(userId, metadata = {}) {
+  if (!userId) return null;
+
+  const state = readState();
+  const companyId = state.company?.company_id;
+  if (!companyId) return null;
+
+  const existingUserMembership = await getCompanyMembershipForUser(userId, companyId);
+  if (existingUserMembership) return existingUserMembership;
+
+  const ownerMembership = localMemberships().find((membership) =>
+    membership.company_id === companyId &&
+    membership.role === 'owner' &&
+    membership.status === 'active' &&
+    !membership.user_id
+  ) || await ensureDefaultOwnerMembership({
+    ...metadata,
+    action: 'company-membership:ensure-owner-for-auth-link'
+  });
+
+  if (!ownerMembership) return null;
+
+  const linkedMembership = {
+    ...ownerMembership,
+    user_id: userId
+  };
+  const persistedMembership = (await writeSupabaseMembership(linkedMembership)) || linkedMembership;
+  const memberships = localMemberships();
+  const nextMemberships = memberships.some((membership) => membership.membership_id === persistedMembership.membership_id)
+    ? memberships.map((membership) => (
+        membership.membership_id === persistedMembership.membership_id ? persistedMembership : membership
+      ))
+    : [...memberships, persistedMembership];
+
+  writeLocalMemberships(nextMemberships, {
+    ...metadata,
+    action: metadata.action || 'company-membership:attach-owner-user',
+    membership_id: persistedMembership.membership_id,
+    user_id: userId
+  });
+
+  emit('company-memberships:changed', {
+    action: 'attach-owner-user',
     membership_id: persistedMembership.membership_id,
     membership: clone(persistedMembership),
     metadata: clone(metadata)
