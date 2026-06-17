@@ -1,6 +1,7 @@
 -- FieldCore Service production schema for Supabase.
 -- Paste this file into the Supabase SQL Editor and run it as one script.
--- RLS policies are intentionally limited to foundation tables in this phase.
+-- RLS policies are intentionally limited to company, membership, settings,
+-- employee, service plan, customer, and property tables in this phase.
 
 begin;
 
@@ -365,6 +366,55 @@ create table if not exists public.customers (
   constraint customers_status_check check (status in ('active', 'inactive'))
 );
 
+alter table public.customers enable row level security;
+
+drop policy if exists "owners admins and managers can read customers" on public.customers;
+create policy "owners admins and managers can read customers"
+  on public.customers
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert customers" on public.customers;
+create policy "owners admins and managers can insert customers"
+  on public.customers
+  for insert
+  to authenticated
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  );
+
+drop policy if exists "owners admins and managers can update customers" on public.customers;
+create policy "owners admins and managers can update customers"
+  on public.customers
+  for update
+  to authenticated
+  using (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  )
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  );
+
+drop policy if exists "owners and admins can delete customers" on public.customers;
+create policy "owners and admins can delete customers"
+  on public.customers
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
 create table if not exists public.service_plans (
   service_plan_id text primary key default ('plan_' || replace(gen_random_uuid()::text, '-', '')),
   company_id text not null references public.companies(company_id) on delete cascade,
@@ -442,6 +492,55 @@ create table if not exists public.properties (
 
 alter table public.properties
   add column if not exists recurring_schedule jsonb;
+
+alter table public.properties enable row level security;
+
+drop policy if exists "owners admins and managers can read properties" on public.properties;
+create policy "owners admins and managers can read properties"
+  on public.properties
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert properties" on public.properties;
+create policy "owners admins and managers can insert properties"
+  on public.properties
+  for insert
+  to authenticated
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  );
+
+drop policy if exists "owners admins and managers can update properties" on public.properties;
+create policy "owners admins and managers can update properties"
+  on public.properties
+  for update
+  to authenticated
+  using (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  )
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin'])
+    or (
+      public.has_company_role(company_id, array['manager'])
+      and status = 'active'
+    )
+  );
+
+drop policy if exists "owners and admins can delete properties" on public.properties;
+create policy "owners and admins can delete properties"
+  on public.properties
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 create table if not exists public.routes (
   route_id text primary key default ('route_' || replace(gen_random_uuid()::text, '-', '')),

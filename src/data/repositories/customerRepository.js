@@ -71,6 +71,20 @@ async function ensureSupabaseCompany(state, companyId = state.company?.company_i
   const company = state.company;
   if (!companyId) return false;
 
+  const existingCompany = await supabaseSelect('companies', {
+    select: 'company_id',
+    company_id: `eq.${companyId}`,
+    limit: '1'
+  });
+  if (
+    existingCompany.configured &&
+    !existingCompany.error &&
+    Array.isArray(existingCompany.data) &&
+    existingCompany.data.length
+  ) {
+    return true;
+  }
+
   const response = await supabaseUpsert(
     'companies',
     {
