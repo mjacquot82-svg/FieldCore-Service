@@ -12,7 +12,7 @@ function emitPaymentsChanged(invoice, metadata) {
   });
 }
 
-export function updateInvoicePaymentStatus(invoiceId, nextStatus, metadata = {}) {
+export async function updateInvoicePaymentStatus(invoiceId, nextStatus, metadata = {}) {
   const invoice = getInvoice(invoiceId);
   if (!invoice) return null;
 
@@ -26,7 +26,7 @@ export function updateInvoicePaymentStatus(invoiceId, nextStatus, metadata = {})
     patch.amount_paid = Number((invoice.total / 2).toFixed(2));
   }
 
-  const updatedInvoice = updateInvoicePaymentFields(invoiceId, patch, {
+  const updatedInvoice = await updateInvoicePaymentFields(invoiceId, patch, {
     ...metadata,
     action: metadata.action || 'payment:update-invoice-status',
     eventAction: metadata.eventAction || 'payment-status-updated',

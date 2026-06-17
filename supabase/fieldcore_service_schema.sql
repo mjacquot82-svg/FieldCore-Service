@@ -238,6 +238,7 @@ create table if not exists public.invoices (
   invoice_number text not null,
   invoice_date date not null,
   due_date date not null,
+  visit_ids jsonb not null default '[]'::jsonb,
   subtotal numeric(12, 2) not null default 0,
   tax numeric(12, 2) not null default 0,
   total numeric(12, 2) not null default 0,
@@ -254,6 +255,9 @@ create table if not exists public.invoices (
     payment_status in ('draft', 'sent', 'partial', 'paid', 'overdue', 'void')
   )
 );
+
+alter table public.invoices
+  add column if not exists visit_ids jsonb not null default '[]'::jsonb;
 
 create table if not exists public.invoice_line_items (
   line_item_id text primary key default ('ili_' || replace(gen_random_uuid()::text, '-', '')),

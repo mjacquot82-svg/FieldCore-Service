@@ -80,7 +80,7 @@ export async function generateInvoicesForVisits(visitIds, metadata = {}) {
     customerVisits.forEach((visit) => touchedVisitIds.add(visit.visit_id));
   });
 
-  const createdInvoices = createInvoices(newInvoices, {
+  const createdInvoices = await createInvoices(newInvoices, {
     ...metadata,
     action: metadata.action || 'billing:create-selected-invoices',
     eventAction: metadata.eventAction || 'billing-create-selected-invoices'

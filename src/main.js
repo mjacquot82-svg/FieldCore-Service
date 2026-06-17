@@ -700,7 +700,7 @@ function bindEvents() {
     showOverdueRoute = false;
     render();
   });
-  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', () => { const [invoiceId, status] = button.dataset.pay.split(':'); updateInvoicePaymentStatus(invoiceId, status, { source: 'payments-view' }); state = loadState(); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
+  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', async () => { const [invoiceId, status] = button.dataset.pay.split(':'); await updateInvoicePaymentStatus(invoiceId, status, { source: 'payments-view' }); state = loadState(); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   if (activeView === 'route-builder') {

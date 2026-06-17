@@ -32,8 +32,8 @@ export async function generateSelectedVisitInvoices(state, visitIds) {
   });
 }
 
-export function updateInvoicePaymentStatus(state, invoiceId, nextStatus) {
-  const updatedInvoice = updateInvoicePaymentStatusService(invoiceId, nextStatus, {
+export async function updateInvoicePaymentStatus(state, invoiceId, nextStatus) {
+  const updatedInvoice = await updateInvoicePaymentStatusService(invoiceId, nextStatus, {
     source: 'store-compat'
   });
 
