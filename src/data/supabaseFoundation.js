@@ -1,4 +1,5 @@
 import { syncEmployeesFromSupabase } from './repositories/employeeRepository.js';
+import { syncCompanyMembershipsFromSupabase } from './repositories/companyMembershipRepository.js';
 import { syncCustomersFromSupabase } from './repositories/customerRepository.js';
 import { syncInvoicesFromSupabase } from './repositories/invoiceRepository.js';
 import { syncPaymentsFromSupabase } from './repositories/paymentRepository.js';
@@ -16,6 +17,7 @@ export async function syncFoundationFromSupabase() {
     syncSettingsFromSupabase(),
     syncEmployeesFromSupabase()
   ]);
+  const companyMemberships = await syncCompanyMembershipsFromSupabase();
   const customers = await syncCustomersFromSupabase();
   const properties = await syncPropertiesFromSupabase();
   const visits = await syncVisitsFromSupabase();
@@ -26,9 +28,10 @@ export async function syncFoundationFromSupabase() {
 
   return {
     configured: true,
-    synced: Boolean(settings || employees || customers || properties || visits || routes || invoices || payments || shifts),
+    synced: Boolean(settings || employees || companyMemberships || customers || properties || visits || routes || invoices || payments || shifts),
     settings: Boolean(settings),
     employees: Boolean(employees),
+    companyMemberships: Boolean(companyMemberships),
     customers: Boolean(customers),
     properties: Boolean(properties),
     visits: Boolean(visits),

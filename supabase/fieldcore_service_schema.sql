@@ -57,6 +57,19 @@ create table if not exists public.employees (
   constraint employees_status_check check (status in ('active', 'inactive'))
 );
 
+create table if not exists public.company_memberships (
+  membership_id text primary key default ('mbr_' || replace(gen_random_uuid()::text, '-', '')),
+  company_id text not null references public.companies(company_id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  employee_id text references public.employees(employee_id) on delete set null,
+  role text not null default 'employee',
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint company_memberships_role_check check (role in ('owner', 'admin', 'manager', 'employee')),
+  constraint company_memberships_status_check check (status in ('active', 'inactive'))
+);
+
 alter table public.company_settings
   add column if not exists admin_pin text;
 
@@ -326,6 +339,17 @@ create table if not exists public.activity_events (
 
 create index if not exists company_settings_company_id_idx on public.company_settings(company_id);
 
+create index if not exists company_memberships_company_id_idx on public.company_memberships(company_id);
+create index if not exists company_memberships_user_id_idx on public.company_memberships(user_id);
+create index if not exists company_memberships_employee_id_idx on public.company_memberships(employee_id);
+create index if not exists company_memberships_company_status_idx on public.company_memberships(company_id, status);
+create unique index if not exists company_memberships_company_user_idx
+  on public.company_memberships(company_id, user_id)
+  where user_id is not null;
+create unique index if not exists company_memberships_company_employee_idx
+  on public.company_memberships(company_id, employee_id)
+  where employee_id is not null;
+
 create index if not exists employees_company_id_idx on public.employees(company_id);
 create index if not exists employees_company_status_idx on public.employees(company_id, status);
 
@@ -385,6 +409,10 @@ create or replace trigger set_companies_updated_at
 
 create or replace trigger set_company_settings_updated_at
   before update on public.company_settings
+  for each row execute function public.set_updated_at();
+
+create or replace trigger set_company_memberships_updated_at
+  before update on public.company_memberships
   for each row execute function public.set_updated_at();
 
 create or replace trigger set_employees_updated_at
