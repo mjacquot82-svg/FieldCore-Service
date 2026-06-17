@@ -33,13 +33,15 @@ create table if not exists public.company_settings (
   tax_rate numeric(7, 6) not null default 0,
   payroll_week_start text not null default 'sunday',
   admin_pin text,
+  admin_pin_hash text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint company_settings_company_id_key unique (company_id),
   constraint company_settings_default_due_days_check check (default_due_days >= 0),
   constraint company_settings_tax_rate_check check (tax_rate >= 0),
   constraint company_settings_payroll_week_start_check check (payroll_week_start in ('sunday', 'monday')),
-  constraint company_settings_admin_pin_check check (admin_pin is null or admin_pin ~ '^[0-9]{4}$')
+  constraint company_settings_admin_pin_check check (admin_pin is null or admin_pin ~ '^[0-9]{4}$'),
+  constraint company_settings_admin_pin_hash_check check (admin_pin_hash is null or length(admin_pin_hash) >= 20)
 );
 
 create table if not exists public.employees (
@@ -73,8 +75,14 @@ create table if not exists public.company_memberships (
 alter table public.company_settings
   add column if not exists admin_pin text;
 
+alter table public.company_settings
+  add column if not exists admin_pin_hash text;
+
 alter table public.employees
   add column if not exists pin text;
+
+alter table public.employees
+  add column if not exists pin_hash text;
 
 do $$
 begin
@@ -100,6 +108,34 @@ begin
   ) then
     alter table public.employees
       add constraint employees_pin_check check (pin is null or pin ~ '^[0-9]{4}$');
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'company_settings_admin_pin_hash_check'
+      and conrelid = 'public.company_settings'::regclass
+  ) then
+    alter table public.company_settings
+      add constraint company_settings_admin_pin_hash_check check (admin_pin_hash is null or length(admin_pin_hash) >= 20);
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'employees_pin_hash_check'
+      and conrelid = 'public.employees'::regclass
+  ) then
+    alter table public.employees
+      add constraint employees_pin_hash_check check (pin_hash is null or length(pin_hash) >= 20);
   end if;
 end;
 $$;

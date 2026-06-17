@@ -26,7 +26,7 @@ function employeeCard(employee) {
       <div class="customer-card-header">
         <div>
           <h3>${employee.name}</h3>
-          <p>${employee.role || 'Worker'} · PIN ${employee.pin}</p>
+          <p>${employee.role || 'Worker'} · PIN set</p>
         </div>
         <span class="badge ${employee.status === 'active' ? 'paid-up' : 'outstanding'}">${employee.status}</span>
       </div>

@@ -1,10 +1,23 @@
 import { emit } from '../appEventBus.js';
+import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
 const DEFAULT_ADMIN_PIN = '0000';
 const SETTINGS_SELECT_FIELDS = [
+  'settings_id',
+  'company_id',
+  'invoice_prefix',
+  'default_due_days',
+  'tax_rate',
+  'payroll_week_start',
+  'admin_pin',
+  'admin_pin_hash',
+  'created_at',
+  'updated_at'
+].join(',');
+const LEGACY_SETTINGS_SELECT_FIELDS = [
   'settings_id',
   'company_id',
   'invoice_prefix',
@@ -60,6 +73,7 @@ function normalizeSettingsForSupabase(settings, state, activeCompanyId = state.c
     tax_rate: Number(settings.tax_rate ?? 0),
     payroll_week_start: settings.payroll_week_start || 'sunday',
     admin_pin: settings.admin_pin || null,
+    admin_pin_hash: settings.admin_pin_hash || null,
     created_at: settings.created_at
   };
 }
@@ -76,11 +90,18 @@ function normalizeSettingsFromSupabase(row) {
 async function readSupabaseSettings(companyId) {
   if (!companyId) return null;
 
-  const response = await supabaseSelect('company_settings', {
+  let response = await supabaseSelect('company_settings', {
     select: SETTINGS_SELECT_FIELDS,
     company_id: `eq.${companyId}`,
     limit: '1'
   });
+  if (response.configured && response.error) {
+    response = await supabaseSelect('company_settings', {
+      select: LEGACY_SETTINGS_SELECT_FIELDS,
+      company_id: `eq.${companyId}`,
+      limit: '1'
+    });
+  }
 
   if (!response.configured || response.error || !Array.isArray(response.data)) return null;
   return normalizeSettingsFromSupabase(response.data[0]);
@@ -103,6 +124,23 @@ async function writeSupabaseSettings(settings) {
   return normalizeSettingsFromSupabase(response.data[0]);
 }
 
+async function hardenAdminPin(settings) {
+  if (!settings?.admin_pin || settings.admin_pin_hash) {
+    return settings?.admin_pin_hash
+      ? {
+          ...settings,
+          admin_pin: null
+        }
+      : settings;
+  }
+
+  return {
+    ...settings,
+    admin_pin: null,
+    admin_pin_hash: await hashPin(settings.admin_pin)
+  };
+}
+
 export async function syncSettingsFromSupabase() {
   const state = readState();
   const companyId = await resolveRepositoryCompanyId();
@@ -111,7 +149,8 @@ export async function syncSettingsFromSupabase() {
     const local = localSettings();
     if (!local.company_id) return null;
 
-    const bootstrappedSettings = await writeSupabaseSettings(local);
+    const hardenedLocalSettings = await hardenAdminPin(local);
+    const bootstrappedSettings = await writeSupabaseSettings(hardenedLocalSettings);
     if (!bootstrappedSettings) return null;
 
     writeLocalSettings(bootstrappedSettings, {
@@ -121,11 +160,16 @@ export async function syncSettingsFromSupabase() {
     return clone(bootstrappedSettings);
   }
 
-  writeLocalSettings(settings, {
+  const hardenedSettings = await hardenAdminPin(settings);
+  const migratedSettings = settings.admin_pin !== hardenedSettings.admin_pin
+    ? ((await writeSupabaseSettings(hardenedSettings)) || hardenedSettings)
+    : hardenedSettings;
+
+  writeLocalSettings(migratedSettings, {
     action: 'settings:sync-from-supabase'
   });
 
-  return clone(settings);
+  return clone(migratedSettings);
 }
 
 export function getSettings() {
@@ -138,11 +182,12 @@ export function getAdminPin() {
 
 export async function ensureDefaultAdminPin() {
   const state = readState();
-  if (state.settings?.admin_pin) return clone(state.settings);
+  if (state.settings?.admin_pin || state.settings?.admin_pin_hash) return clone(state.settings);
 
   const settings = {
     ...(state.settings || {}),
-    admin_pin: DEFAULT_ADMIN_PIN
+    admin_pin: null,
+    admin_pin_hash: await hashPin(DEFAULT_ADMIN_PIN)
   };
 
   const persistedSettings = (await writeSupabaseSettings(settings)) || settings;
@@ -152,6 +197,28 @@ export async function ensureDefaultAdminPin() {
 
   emit('settings:changed', {
     action: 'ensure-default-admin-pin',
+    settings: clone(persistedSettings)
+  });
+
+  return clone(persistedSettings);
+}
+
+export async function updateAdminPin(pin, metadata = {}) {
+  const state = readState();
+  const settings = {
+    ...(state.settings || {}),
+    admin_pin: null,
+    admin_pin_hash: await hashPin(pin)
+  };
+
+  const persistedSettings = (await writeSupabaseSettings(settings)) || settings;
+  writeLocalSettings(persistedSettings, {
+    ...metadata,
+    action: metadata.action || 'settings:update-admin-pin'
+  });
+
+  emit('settings:changed', {
+    action: 'update-admin-pin',
     settings: clone(persistedSettings)
   });
 

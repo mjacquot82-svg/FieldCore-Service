@@ -1,12 +1,14 @@
 import { listActiveEmployees } from './data/repositories/employeeRepository.js';
 import {
-  ensureDefaultAdminPin as ensureDefaultAdminPinRecord,
-  getAdminPin as getAdminPinRecord
+  ensureDefaultAdminPin as ensureDefaultAdminPinRecord
 } from './data/repositories/settingsRepository.js';
+import {
+  verifyAdminPin,
+  verifyEmployeePin
+} from './services/pinVerificationService.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
-const DEFAULT_ADMIN_PIN = '0000';
 
 function loadState() {
   try {
@@ -32,13 +34,9 @@ export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-export function getAdminPin(state) {
-  return state?.settings?.admin_pin || getAdminPinRecord() || DEFAULT_ADMIN_PIN;
-}
-
 export async function ensureDefaultAdminPin(state) {
   if (!state) return;
-  if (state.settings?.admin_pin) return;
+  if (state.settings?.admin_pin || state.settings?.admin_pin_hash) return;
   await ensureDefaultAdminPinRecord();
 }
 
@@ -96,13 +94,13 @@ export function renderLogin() {
 export function bindLoginEvents() {
   const adminForm = document.querySelector('#admin-login-form');
   if (adminForm) {
-    adminForm.addEventListener('submit', (event) => {
+    adminForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const state = loadState();
       const formData = new FormData(adminForm);
       const pin = String(formData.get('admin_pin') || '').trim();
 
-      if (pin !== getAdminPin(state)) {
+      if (!await verifyAdminPin(pin, state)) {
         window.alert('Invalid admin PIN.');
         return;
       }
@@ -114,15 +112,15 @@ export function bindLoginEvents() {
 
   const employeeForm = document.querySelector('#employee-login-form');
   if (employeeForm) {
-    employeeForm.addEventListener('submit', (event) => {
+    employeeForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const state = loadState();
       const formData = new FormData(employeeForm);
       const employeeId = String(formData.get('employee_id') || '').trim();
       const pin = String(formData.get('employee_pin') || '').trim();
-      const employee = activeEmployees(state).find((item) => item.employee_id === employeeId);
+      const employee = await verifyEmployeePin(employeeId, pin, state);
 
-      if (!employee || employee.pin !== pin) {
+      if (!employee) {
         window.alert('Invalid employee or PIN.');
         return;
       }

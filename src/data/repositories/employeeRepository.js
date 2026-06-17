@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -9,6 +10,7 @@ const EMPLOYEE_SELECT_FIELDS = [
   'name',
   'role',
   'pin',
+  'pin_hash',
   'status',
   'created_at',
   'updated_at'
@@ -62,10 +64,33 @@ function normalizeEmployeeForSupabase(employee) {
     company_id: employee.company_id,
     name: employee.name || '',
     role: employee.role || 'Worker',
-    pin: employee.pin || '',
+    pin: employee.pin || null,
+    pin_hash: employee.pin_hash || null,
     status: employee.status || 'active',
     created_at: employee.created_at
   };
+}
+
+function removePlaintextPin(employee) {
+  if (!employee?.pin_hash) return employee;
+  return {
+    ...employee,
+    pin: null
+  };
+}
+
+async function hardenEmployeePin(employee) {
+  if (!employee?.pin || employee.pin_hash) return removePlaintextPin(employee);
+
+  return {
+    ...employee,
+    pin: null,
+    pin_hash: await hashPin(employee.pin)
+  };
+}
+
+async function hardenEmployeePins(employees) {
+  return Promise.all((employees || []).map(hardenEmployeePin));
 }
 
 async function readSupabaseEmployees(companyId) {
@@ -132,7 +157,8 @@ export async function syncEmployeesFromSupabase() {
   if (!employees) return null;
 
   if (!employees.length && (state.employees || []).length) {
-    const bootstrappedEmployees = await writeSupabaseEmployees(state.employees || []);
+    const hardenedLocalEmployees = await hardenEmployeePins(state.employees || []);
+    const bootstrappedEmployees = await writeSupabaseEmployees(hardenedLocalEmployees);
     if (!bootstrappedEmployees) return null;
 
     writeLocalEmployees(bootstrappedEmployees, {
@@ -142,11 +168,16 @@ export async function syncEmployeesFromSupabase() {
     return clone(bootstrappedEmployees);
   }
 
-  writeLocalEmployees(employees, {
+  const hardenedEmployees = await hardenEmployeePins(employees);
+  const migratedEmployees = employees.some((employee, index) => employee.pin !== hardenedEmployees[index].pin)
+    ? ((await writeSupabaseEmployees(hardenedEmployees)) || hardenedEmployees)
+    : hardenedEmployees;
+
+  writeLocalEmployees(migratedEmployees, {
     action: 'employees:sync-from-supabase'
   });
 
-  return clone(employees);
+  return clone(migratedEmployees);
 }
 
 export function listEmployees() {
@@ -165,12 +196,14 @@ export function getEmployee(employeeId) {
 export async function createEmployee(employeeInput = {}) {
   const state = readState();
   const companyId = await resolveRepositoryCompanyId();
+  const pinHash = employeeInput.pin_hash || await hashPin(employeeInput.pin);
   const employee = {
     employee_id: employeeInput.employee_id || makeEmployeeId(),
     company_id: employeeInput.company_id || companyId,
     name: employeeInput.name || '',
     role: employeeInput.role || 'Worker',
-    pin: employeeInput.pin || '',
+    pin: null,
+    pin_hash: pinHash,
     status: employeeInput.status || 'active',
     created_at: employeeInput.created_at || new Date().toISOString()
   };
@@ -233,13 +266,15 @@ export async function toggleEmployeeStatus(employeeId) {
 export async function updateEmployeePin(employeeId, pin) {
   const state = readState();
   let updatedEmployee = null;
+  const pinHash = await hashPin(pin);
 
   const employees = state.employees || [];
   const nextEmployees = employees.map((employee) => {
     if (employee.employee_id !== employeeId) return employee;
     updatedEmployee = {
       ...employee,
-      pin
+      pin: null,
+      pin_hash: pinHash
     };
     return updatedEmployee;
   });
