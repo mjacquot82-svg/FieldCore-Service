@@ -100,6 +100,27 @@ export async function getRlsFoundationPreflight() {
         canUpdateAssigned: isEmployee,
         hasEmployeeAssignmentContext
       })
+    },
+    invoices: {
+      canRead: hasOperationalRole,
+      canCreate: hasOperationalRole,
+      canUpdate: hasOperationalRole,
+      canDelete: hasElevatedRole,
+      reason: getFinancialAccessReason(diagnostics, hasOperationalRole)
+    },
+    invoiceLineItems: {
+      canRead: hasOperationalRole,
+      canCreate: hasOperationalRole,
+      canUpdate: hasOperationalRole,
+      canDelete: hasOperationalRole,
+      reason: getFinancialAccessReason(diagnostics, hasOperationalRole)
+    },
+    payments: {
+      canRead: hasOperationalRole,
+      canCreate: hasOperationalRole,
+      canUpdate: hasOperationalRole,
+      canDelete: hasElevatedRole,
+      reason: getFinancialAccessReason(diagnostics, hasOperationalRole)
     }
   };
 
@@ -110,6 +131,9 @@ export async function getRlsFoundationPreflight() {
     propertyAccess: operationalAccess.properties,
     routeAccess: operationalAccess.routes,
     visitAccess: operationalAccess.visits,
+    invoiceAccess: operationalAccess.invoices,
+    invoiceLineItemAccess: operationalAccess.invoiceLineItems,
+    paymentAccess: operationalAccess.payments,
     operationalAccess,
     diagnostics
   };
@@ -154,6 +178,17 @@ function getWorkflowAccessReason(diagnostics, access) {
   }
   if (access.canReadAssigned) return `Role "${diagnostics.role}" can read assigned routes and visits only.`;
   return `Role "${diagnostics.role}" is not permitted for visit/route access in this phase.`;
+}
+
+function getFinancialAccessReason(diagnostics, canAccessFinancials) {
+  if (!diagnostics.authenticated) return 'No authenticated Supabase user.';
+  if (!diagnostics.transportAuthenticated) return 'Supabase transport is using the anon key.';
+  if (!diagnostics.companyResolved) return 'No company could be resolved from membership or local state.';
+  if (!diagnostics.membershipActive) return 'No active company membership was found.';
+  if (!diagnostics.membershipUserLinked) return 'Active membership is not linked to the authenticated user.';
+  if (!diagnostics.role) return 'Membership role is missing.';
+  if (canAccessFinancials) return `Role "${diagnostics.role}" has billing and payment access for current workflows.`;
+  return `Role "${diagnostics.role}" is not permitted for invoice or payment access in this phase.`;
 }
 
 export async function attachCurrentUserToOwnerMembership(metadata = {}) {

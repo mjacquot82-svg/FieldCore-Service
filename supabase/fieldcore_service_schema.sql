@@ -873,6 +873,97 @@ create table if not exists public.payments (
   )
 );
 
+alter table public.invoices enable row level security;
+alter table public.invoice_line_items enable row level security;
+alter table public.payments enable row level security;
+
+drop policy if exists "owners admins and managers can read invoices" on public.invoices;
+create policy "owners admins and managers can read invoices"
+  on public.invoices
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert invoices" on public.invoices;
+create policy "owners admins and managers can insert invoices"
+  on public.invoices
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can update invoices" on public.invoices;
+create policy "owners admins and managers can update invoices"
+  on public.invoices
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners and admins can delete invoices" on public.invoices;
+create policy "owners and admins can delete invoices"
+  on public.invoices
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners admins and managers can read invoice line items" on public.invoice_line_items;
+create policy "owners admins and managers can read invoice line items"
+  on public.invoice_line_items
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert invoice line items" on public.invoice_line_items;
+create policy "owners admins and managers can insert invoice line items"
+  on public.invoice_line_items
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can update invoice line items" on public.invoice_line_items;
+create policy "owners admins and managers can update invoice line items"
+  on public.invoice_line_items
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can delete invoice line items" on public.invoice_line_items;
+create policy "owners admins and managers can delete invoice line items"
+  on public.invoice_line_items
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can read payments" on public.payments;
+create policy "owners admins and managers can read payments"
+  on public.payments
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert payments" on public.payments;
+create policy "owners admins and managers can insert payments"
+  on public.payments
+  for insert
+  to authenticated
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can update payments" on public.payments;
+create policy "owners admins and managers can update payments"
+  on public.payments
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners and admins can delete payments" on public.payments;
+create policy "owners and admins can delete payments"
+  on public.payments
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
 create table if not exists public.shifts (
   shift_id text primary key default ('shift_' || replace(gen_random_uuid()::text, '-', '')),
   company_id text not null references public.companies(company_id) on delete cascade,

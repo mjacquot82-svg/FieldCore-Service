@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { resolveRepositoryCompanyId } from '../repositoryContext.js';
+import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -247,11 +247,12 @@ async function writeSupabaseInvoices(invoices) {
 
 export async function syncInvoicesFromSupabase() {
   const state = readState();
-  const companyId = await resolveRepositoryCompanyId();
+  const context = await resolveRepositoryCompanyContext();
+  const companyId = context?.companyId;
   const invoices = await readSupabaseInvoices(companyId);
   if (!invoices) return null;
 
-  if (!invoices.length && (state.invoices || []).length) {
+  if (!invoices.length && context?.membership?.role !== 'employee' && (state.invoices || []).length) {
     const bootstrappedInvoices = await writeSupabaseInvoices(state.invoices || []);
     if (!bootstrappedInvoices) return null;
 
