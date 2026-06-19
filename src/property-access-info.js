@@ -6,6 +6,7 @@ import {
 import {
   getStateSnapshot
 } from './data/repositories/visitReadRepository.js';
+import { escapeHtml } from './utils/renderSecurity.js';
 
 function propertyMap(state) {
   return Object.fromEntries((state.properties || []).map((property) => [property.property_id, property]));
@@ -55,7 +56,7 @@ function showAccessInfoOnRouteCards() {
     block.setAttribute('data-property-access-info', 'true');
     block.innerHTML = `
       <strong>Access Info</strong>
-      ${lines.map((line) => `<p>${line}</p>`).join('')}
+      ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
     `;
 
     const actions = card.querySelector('.actions');

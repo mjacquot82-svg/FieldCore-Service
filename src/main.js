@@ -51,6 +51,7 @@ import {
   getRestrictedViewReason,
   getUiPermissions
 } from './services/uiPermissionService.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const app = document.querySelector('#app');
 let state = isProductionMode() ? {} : loadState();
@@ -233,9 +234,9 @@ function renderVisitStatusLine(propertyId) {
   const currentDate = today();
   const scheduledVisits = getScheduledVisitsForProperty(propertyId);
   const overdueVisit = scheduledVisits.find((v) => v.visit_date < currentDate);
-  if (overdueVisit) return `<p><span class="badge overdue">⚠ Overdue since ${overdueVisit.visit_date}</span></p>`;
+  if (overdueVisit) return `<p><span class="badge overdue">⚠ Overdue since ${escapeHtml(overdueVisit.visit_date)}</span></p>`;
   const nextVisit = scheduledVisits.find((v) => v.visit_date >= currentDate);
-  if (nextVisit) return `<p><span class="badge paid-up">Next visit: ${nextVisit.visit_date}</span></p>`;
+  if (nextVisit) return `<p><span class="badge paid-up">Next visit: ${escapeHtml(nextVisit.visit_date)}</span></p>`;
   return '<p><span class="badge outstanding">Next visit: none scheduled</span></p>';
 }
 
@@ -246,7 +247,7 @@ function renderOverdueVisitBanner(propertyMap, customerMap) {
   const property = propertyMap[firstVisit.property_id];
   const customer = customerMap[property?.customer_id];
   const plural = overdueVisits.length === 1 ? 'visit is' : 'visits are';
-  const example = property ? ` Oldest: ${customer?.name ?? 'Unknown customer'} · ${property.service_address} · ${firstVisit.visit_date}.` : '';
+  const example = property ? ` Oldest: ${escapeHtml(customer?.name ?? 'Unknown customer')} · ${escapeHtml(property.service_address)} · ${escapeHtml(firstVisit.visit_date)}.` : '';
   return `<div class="flash overdue-alert">⚠ ${overdueVisits.length} scheduled ${plural} overdue.${example} <button class="primary" data-overdue-visits>View overdue visits</button></div>`;
 }
 
@@ -255,12 +256,12 @@ function renderPropertyQuickActionCards(properties, customerMap) {
   if (!properties.length) return '<article class="panel"><p>No service locations found for this customer.</p></article>';
   return properties.map((p) => {
     const actions = [
-      permissions.visits.create ? `<button data-service-schedule="${p.property_id}">Schedule Visit</button>` : '',
-      permissions.properties.update ? `<button data-service-pause="${p.property_id}">Pause Service</button>` : '',
-      permissions.properties.update ? `<button data-service-frequency="${p.property_id}">Change Frequency</button>` : '',
-      permissions.properties.update ? `<button data-service-price="${p.property_id}">Adjust Price</button>` : ''
+      permissions.visits.create ? `<button data-service-schedule="${escapeAttr(p.property_id)}">Schedule Visit</button>` : '',
+      permissions.properties.update ? `<button data-service-pause="${escapeAttr(p.property_id)}">Pause Service</button>` : '',
+      permissions.properties.update ? `<button data-service-frequency="${escapeAttr(p.property_id)}">Change Frequency</button>` : '',
+      permissions.properties.update ? `<button data-service-price="${escapeAttr(p.property_id)}">Adjust Price</button>` : ''
     ].filter(Boolean).join('');
-    return `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
+    return `<article class="panel"><div class="customer-card-header"><div><h3>${escapeHtml(p.service_address)}</h3><p>${escapeHtml(customerMap[p.customer_id]?.name ?? 'Unknown Customer')}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${escapeHtml(p.status)}</span></div><p>${escapeHtml(p.service_type)} · ${escapeHtml(p.recurring_frequency)}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${escapeHtml(p.notes || 'None')}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
   }).join('');
 }
 
@@ -302,7 +303,7 @@ async function render() {
   const sessionBanner = renderSessionBanner(currentSession);
   const overdueBanner = isWorkerSession(currentSession) ? '' : renderOverdueVisitBanner(propertyMap, customerMap);
 
-  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${sessionBanner}${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${overdueBanner}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
+  app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${escapeHtml(companyName)}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${escapeAttr(id)}">${escapeHtml(label)}</button>`).join('')}</nav></aside><main class="content">${sessionBanner}${flashMessage ? `<div class="flash">${escapeHtml(flashMessage)}</div>` : ''}${overdueBanner}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${escapeAttr(id)}">${escapeHtml(label)}</button>`).join('')}</nav></div>`;
   bindEvents();
 }
 
@@ -311,8 +312,8 @@ function renderProductionModeBlocker(reason) {
     <main class="content login-shell">
       <section class="panel login-card">
         <h1>FieldCore Production Mode</h1>
-        <p>${reason}</p>
-        <p>Current mode: ${getAppMode()}</p>
+        <p>${escapeHtml(reason)}</p>
+        <p>Current mode: ${escapeHtml(getAppMode())}</p>
       </section>
     </main>
   `;
@@ -337,7 +338,7 @@ function renderView(view, metrics, customerMap, propertyMap) {
 }
 
 function renderRestrictedView(view) {
-  return `<section><h2>Access Restricted</h2><article class="panel"><p>${getRestrictedViewReason(view, currentSession)}</p><button class="primary" data-nav="${getDefaultView(currentSession)}">Return to allowed view</button></article></section>`;
+  return `<section><h2>Access Restricted</h2><article class="panel"><p>${escapeHtml(getRestrictedViewReason(view, currentSession))}</p><button class="primary" data-nav="${escapeAttr(getDefaultView(currentSession))}">Return to allowed view</button></article></section>`;
 }
 
 function renderDashboard(metrics) {
@@ -356,13 +357,13 @@ function renderCustomers() {
     const paidUp = balance.outstanding <= 0;
     const overdue = balance.overdue > 0;
     const actions = [
-      permissions.customers.ledger ? `<button data-ledger="${c.customer_id}">View Ledger</button>` : '',
-      permissions.properties.read ? `<button data-customer-nav="properties:${c.customer_id}">Manage Services</button>` : '',
-      `<button data-customer-nav="timeline:${c.customer_id}">Customer Activity</button>`,
-      permissions.customers.update ? `<button data-customer-edit="${c.customer_id}">Edit Customer</button>` : '',
-      permissions.customers.deactivate ? `<button data-customer-remove="${c.customer_id}">Remove Customer</button>` : ''
+      permissions.customers.ledger ? `<button data-ledger="${escapeAttr(c.customer_id)}">View Ledger</button>` : '',
+      permissions.properties.read ? `<button data-customer-nav="properties:${escapeAttr(c.customer_id)}">Manage Services</button>` : '',
+      `<button data-customer-nav="timeline:${escapeAttr(c.customer_id)}">Customer Activity</button>`,
+      permissions.customers.update ? `<button data-customer-edit="${escapeAttr(c.customer_id)}">Edit Customer</button>` : '',
+      permissions.customers.deactivate ? `<button data-customer-remove="${escapeAttr(c.customer_id)}">Remove Customer</button>` : ''
     ].filter(Boolean).join('');
-    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone || 'No phone'} · ${c.email || 'No email'}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address || 'No billing address'}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Activity</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions">${actions}</div></article>`;
+    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${escapeHtml(c.name)}</h3><p>${escapeHtml(c.phone || 'No phone')} · ${escapeHtml(c.email || 'No email')}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${escapeHtml(c.status)}</span></div><p>${escapeHtml(c.billing_address || 'No billing address')}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Activity</span><strong>${escapeHtml(summary.lastVisitDate)}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions">${actions}</div></article>`;
   }).join('') : '<article class="panel"><p>No customers found for this letter.</p></article>'}</div></section>`;
 }
 
@@ -372,26 +373,26 @@ function renderTimeline(customerMap, propertyMap) {
   const properties = customer ? customerProperties(customer.customer_id) : [];
   const events = customer ? buildCustomerTimeline(customer.customer_id, customerMap, propertyMap) : [];
   const quickActions = customer ? `<div class="actions" style="margin: 0.75rem 0;">${[
-    permissions.properties.create ? `<button data-customer-nav="properties:${customer.customer_id}">+ Add Service</button>` : '',
-    permissions.visits.create ? `<button data-customer-nav="properties:${customer.customer_id}">+ Schedule Visit</button>` : '',
+    permissions.properties.create ? `<button data-customer-nav="properties:${escapeAttr(customer.customer_id)}">+ Add Service</button>` : '',
+    permissions.visits.create ? `<button data-customer-nav="properties:${escapeAttr(customer.customer_id)}">+ Schedule Visit</button>` : '',
     permissions.financials.createInvoices ? '<button data-nav="batch">Create Invoice</button>' : '',
     permissions.financials.recordPayments ? '<button data-nav="payments">Record Payment</button>' : ''
   ].filter(Boolean).join('')}</div>` : '';
   const serviceLocationCards = customer ? `<h3>Service Locations</h3><div class="stack">${renderPropertyQuickActionCards(properties, customerMap)}</div>` : '';
-  return `<section><h2>${customer ? `${customer.name} Customer Activity` : 'Customer Activity'}</h2><button class="primary" data-nav="customers">Back to Customers</button>${quickActions}${serviceLocationCards}<h3>Activity Timeline</h3><div class="stack timeline-stack">${events.length ? events.map((event) => `<article class="panel timeline-event"><div class="timeline-date">${event.date}</div><div><span class="badge outstanding">${event.type}</span><h3>${event.title}</h3><p>${event.detail}</p></div></article>`).join('') : '<article class="panel"><p>No customer activity found yet.</p></article>'}</div></section>`;
+  return `<section><h2>${customer ? `${escapeHtml(customer.name)} Customer Activity` : 'Customer Activity'}</h2><button class="primary" data-nav="customers">Back to Customers</button>${quickActions}${serviceLocationCards}<h3>Activity Timeline</h3><div class="stack timeline-stack">${events.length ? events.map((event) => `<article class="panel timeline-event"><div class="timeline-date">${escapeHtml(event.date)}</div><div><span class="badge outstanding">${escapeHtml(event.type)}</span><h3>${escapeHtml(event.title)}</h3><p>${escapeHtml(event.detail)}</p></div></article>`).join('') : '<article class="panel"><p>No customer activity found yet.</p></article>'}</div></section>`;
 }
 
 function renderProperties(customerMap) {
   const permissions = getUiPermissions(currentSession);
   const customer = selectedCustomer();
   const properties = selectedCustomerId ? customerProperties(selectedCustomerId) : state.properties;
-  const serviceForms = customer && (permissions.properties.create || permissions.visits.create) ? `<div class="service-layout">${permissions.properties.create ? `<form id="service-form" class="panel service-form"><h3>Add Recurring Service or Service Location</h3><label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label><label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label><label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label><label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label><button class="primary" type="submit">Add Service</button></form>` : ''}${permissions.visits.create ? `<form id="one-off-form" class="panel service-form"><h3>Schedule One-Off Job</h3>${properties.length ? `<label>Service Location<select name="property_id" required>${properties.map((p) => `<option value="${p.property_id}">${p.service_address}</option>`).join('')}</select></label>` : '<p>Add a service location before scheduling a one-off job.</p>'}<label>Job Date<input name="visit_date" type="date" required /></label><label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label><label>Price<input name="price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label><button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button></form>` : ''}</div>` : '';
-  return `<section><h2>${customer ? `${customer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => {
+  const serviceForms = customer && (permissions.properties.create || permissions.visits.create) ? `<div class="service-layout">${permissions.properties.create ? `<form id="service-form" class="panel service-form"><h3>Add Recurring Service or Service Location</h3><label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label><label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label><label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label><label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label><button class="primary" type="submit">Add Service</button></form>` : ''}${permissions.visits.create ? `<form id="one-off-form" class="panel service-form"><h3>Schedule One-Off Job</h3>${properties.length ? `<label>Service Location<select name="property_id" required>${properties.map((p) => `<option value="${escapeAttr(p.property_id)}">${escapeHtml(p.service_address)}</option>`).join('')}</select></label>` : '<p>Add a service location before scheduling a one-off job.</p>'}<label>Job Date<input name="visit_date" type="date" required /></label><label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label><label>Price<input name="price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label><button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button></form>` : ''}</div>` : '';
+  return `<section><h2>${customer ? `${escapeHtml(customer.name)} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => {
     const actions = customer ? [
-      permissions.properties.update ? `<button data-service-edit="${p.property_id}">Change Service</button>` : '',
-      permissions.properties.deactivate ? `<button data-service-remove="${p.property_id}">Remove Service</button>` : ''
+      permissions.properties.update ? `<button data-service-edit="${escapeAttr(p.property_id)}">Change Service</button>` : '',
+      permissions.properties.deactivate ? `<button data-service-remove="${escapeAttr(p.property_id)}">Remove Service</button>` : ''
     ].filter(Boolean).join('') : '';
-    return `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
+    return `<article class="panel"><div class="customer-card-header"><div><h3>${escapeHtml(p.service_address)}</h3><p>${escapeHtml(customerMap[p.customer_id]?.name ?? 'Unknown Customer')}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${escapeHtml(p.status)}</span></div><p>${escapeHtml(p.service_type)} · ${escapeHtml(p.recurring_frequency)}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${escapeHtml(p.notes || 'None')}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
   }).join('') : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
 }
 
@@ -403,14 +404,14 @@ function renderTodayRoute(customerMap, propertyMap) {
   const dateControl = showOverdueRoute
     ? '<div class="panel"><p>Showing scheduled visits older than today.</p><button data-clear-overdue-route>Back to selected date</button></div>'
     : `<div class="panel"><label>Select Date<input type="date" id="route-date" value="${selectedRouteDate}" /></label></div>`;
-  return `<section><h2>${heading}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; const actions = permissions.visits.updateCompanyWide ? `<div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div>` : ''; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Visit date ${v.visit_date}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p>${actions}</article>`; }).join('') : `<article class="panel"><p>${emptyText}</p></article>`}</div></section>`;
+  return `<section><h2>${escapeHtml(heading)}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; const actions = permissions.visits.updateCompanyWide ? `<div class="actions"><button data-visit-action="${escapeAttr(v.visit_id)}:complete">Mark Completed</button><button data-visit-action="${escapeAttr(v.visit_id)}:skip">Mark Skipped</button><button data-visit-action="${escapeAttr(v.visit_id)}:skip-reschedule">Skip + Reschedule</button></div>` : ''; return `<article class="panel"><h3>${escapeHtml(customer?.name ?? 'Unknown Customer')}</h3><p>${escapeHtml(property?.service_address ?? 'Unknown address')}</p><p>${escapeHtml(v.service_description)}</p><p>${escapeHtml(property?.service_type ?? 'Service')} · ${escapeHtml(property?.recurring_frequency ?? 'n/a')}</p><p>Visit date ${escapeHtml(v.visit_date)}</p><p>Price ${currency(v.price)}</p><p>Notes: ${escapeHtml(v.notes || 'None')}</p><p>Status: ${escapeHtml(v.status)}</p>${actions}</article>`; }).join('') : `<article class="panel"><p>${escapeHtml(emptyText)}</p></article>`}</div></section>`;
 }
 
 function renderSessionBanner(session) {
   return `
     <div class="flash session-banner">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
-        <div><strong>${session.name}</strong> <span style="color:#475569;font-size:0.95rem;">(${session.role})</span></div>
+        <div><strong>${escapeHtml(session.name)}</strong> <span style="color:#475569;font-size:0.95rem;">(${escapeHtml(session.role)})</span></div>
         <button data-logout class="primary">Logout</button>
       </div>
     </div>
@@ -427,26 +428,26 @@ function renderWorkerStop(visit, customers, properties, index) {
   const actions = [];
 
   if (permissions.visits.updateAssignedLifecycle && visit.status === 'scheduled') {
-    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:start">Start Stop</button>`);
-    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
-    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${escapeAttr(visit.visit_id)}:start">Start Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${escapeAttr(visit.visit_id)}:complete">Complete Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${escapeAttr(visit.visit_id)}:skip">Skip Stop</button>`);
   } else if (permissions.visits.updateAssignedLifecycle && visit.status === 'in-progress') {
-    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
-    actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${escapeAttr(visit.visit_id)}:complete">Complete Stop</button>`);
+    actions.push(`<button type="button" data-worker-action="${escapeAttr(visit.visit_id)}:skip">Skip Stop</button>`);
   }
 
   return `
     <article class="panel route-flow-stop ${statusClass}">
       <div class="route-stop-index">
         <p class="route-stop-kicker">Stop ${index + 1}</p>
-        <span>${statusLabel}</span>
+        <span>${escapeHtml(statusLabel)}</span>
       </div>
       <div class="route-stop-main-detail">
-        <h3>${customer?.name || 'Unknown Customer'}</h3>
-        <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
-        <p class="route-stop-service">${serviceText}</p>
-        <p>${property?.service_type || 'Service'} · ${property?.recurring_frequency || 'n/a'}</p>
-        <p>${visit.notes || 'No notes provided.'}</p>
+        <h3>${escapeHtml(customer?.name || 'Unknown Customer')}</h3>
+        <p class="route-stop-address">${escapeHtml(property?.service_address || 'Unknown address')}</p>
+        <p class="route-stop-service">${escapeHtml(serviceText)}</p>
+        <p>${escapeHtml(property?.service_type || 'Service')} · ${escapeHtml(property?.recurring_frequency || 'n/a')}</p>
+        <p>${escapeHtml(visit.notes || 'No notes provided.')}</p>
       </div>
       <div class="actions route-stop-actions">
         ${actions.join('')}
@@ -595,19 +596,19 @@ function renderBillingQueueRow(visit, customerMap, propertyMap) {
   return `
     <article class="ready-bill-row ${isSelected ? 'selected' : ''}">
       <label class="ready-bill-check">
-        <input type="checkbox" data-billing-visit="${visit.visit_id}" ${isSelected ? 'checked' : ''} ${canInvoice ? '' : 'disabled'} />
+        <input type="checkbox" data-billing-visit="${escapeAttr(visit.visit_id)}" ${isSelected ? 'checked' : ''} ${canInvoice ? '' : 'disabled'} />
         <span>${canInvoice ? 'Select visit' : 'Missing customer'}</span>
       </label>
       <div class="ready-bill-main">
         <div>
-          <strong>${customer?.name || 'Unknown Customer'}</strong>
-          <p>${property?.service_address || 'Unknown service location'}</p>
+          <strong>${escapeHtml(customer?.name || 'Unknown Customer')}</strong>
+          <p>${escapeHtml(property?.service_address || 'Unknown service location')}</p>
         </div>
         <span class="badge ${canInvoice ? 'paid-up' : 'overdue'}">${canInvoice ? 'ready' : 'needs setup'}</span>
       </div>
       <div class="ready-bill-detail">
-        <span>${visit.visit_date || 'No date'}</span>
-        <span>${visit.service_description || property?.service_type || 'Service visit'}</span>
+        <span>${escapeHtml(visit.visit_date || 'No date')}</span>
+        <span>${escapeHtml(visit.service_description || property?.service_type || 'Service visit')}</span>
         <strong>${currency(visit.price)}</strong>
       </div>
     </article>
@@ -684,19 +685,19 @@ function renderBatch(customerMap, propertyMap) {
 }
 
 function renderInvoices(customerMap) {
-  return `<section><h2>Invoices</h2><div class="stack">${state.invoices.map((i) => `<article class="panel"><h3>${i.invoice_number}</h3><p>${customerMap[i.customer_id]?.name ?? i.customer_name}</p><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p><p>Status: ${i.payment_status} · Due ${i.due_date}</p></article>`).join('')}</div></section>`;
+  return `<section><h2>Invoices</h2><div class="stack">${state.invoices.map((i) => `<article class="panel"><h3>${escapeHtml(i.invoice_number)}</h3><p>${escapeHtml(customerMap[i.customer_id]?.name ?? i.customer_name)}</p><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p><p>Status: ${escapeHtml(i.payment_status)} · Due ${escapeHtml(i.due_date)}</p></article>`).join('')}</div></section>`;
 }
 
 function renderPayments(customerMap) {
   const permissions = getUiPermissions(currentSession);
   const invoices = state.invoices.filter((i) => i.payment_status !== 'paid');
   const overdue = invoices.filter((i) => i.payment_status === 'overdue');
-  return `<section><h2>Payments / Outstanding Tracking</h2><p>Outstanding Balance: <strong>${currency(computeDashboard(state).totalOutstanding)}</strong></p><h3>Unpaid Invoices</h3><div class="stack">${invoices.map((i) => `<article class="panel"><h4>${i.invoice_number} · ${customerMap[i.customer_id]?.name ?? i.customer_name}</h4><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p>${permissions.financials.recordPayments ? `<div class="actions"><button data-pay="${i.invoice_id}:partial">Mark Partial</button><button data-pay="${i.invoice_id}:paid">Mark Paid</button></div>` : ''}</article>`).join('')}</div><h3>Overdue Invoices</h3><ul>${overdue.map((i) => `<li>${i.invoice_number} - ${currency(i.total - (i.amount_paid || 0))}</li>`).join('')}</ul></section>`;
+  return `<section><h2>Payments / Outstanding Tracking</h2><p>Outstanding Balance: <strong>${currency(computeDashboard(state).totalOutstanding)}</strong></p><h3>Unpaid Invoices</h3><div class="stack">${invoices.map((i) => `<article class="panel"><h4>${escapeHtml(i.invoice_number)} · ${escapeHtml(customerMap[i.customer_id]?.name ?? i.customer_name)}</h4><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p>${permissions.financials.recordPayments ? `<div class="actions"><button data-pay="${escapeAttr(i.invoice_id)}:partial">Mark Partial</button><button data-pay="${escapeAttr(i.invoice_id)}:paid">Mark Paid</button></div>` : ''}</article>`).join('')}</div><h3>Overdue Invoices</h3><ul>${overdue.map((i) => `<li>${escapeHtml(i.invoice_number)} - ${currency(i.total - (i.amount_paid || 0))}</li>`).join('')}</ul></section>`;
 }
 
 function renderSettings() {
   const permissions = getUiPermissions(currentSession);
-  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${state.company.name}</p><p>Company ID: ${state.company.company_id}</p><p>Invoice Prefix: ${state.settings.invoice_prefix}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p>${permissions.settings.resetDemoData ? '<button id="reset-seed">Reset Demo Data</button>' : ''}</article></section>`;
+  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${escapeHtml(state.company.name)}</p><p>Company ID: ${escapeHtml(state.company.company_id)}</p><p>Invoice Prefix: ${escapeHtml(state.settings.invoice_prefix)}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p>${permissions.settings.resetDemoData ? '<button id="reset-seed">Reset Demo Data</button>' : ''}</article></section>`;
 }
 
 function metricCard(label, value) {

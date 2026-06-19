@@ -1,5 +1,6 @@
 import { completeVisit, skipAndRescheduleVisit as rescheduleVisit, skipVisit } from './services/visitLifecycleService.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
@@ -145,18 +146,18 @@ function renderRouteStop(visit, index, customers, properties) {
     <article class="panel route-flow-stop ${stateClass} ${preferredDay !== 'No preference' && !preferredMatch ? 'off-day-preference' : ''}">
       <div class="route-stop-index">
         <p class="route-stop-kicker">Stop ${index + 1}</p>
-        <span>${stopStateLabel(visit)}</span>
+        <span>${escapeHtml(stopStateLabel(visit))}</span>
       </div>
       <div class="route-stop-main-detail">
-        <h3>${customer?.name || 'Unknown Customer'}</h3>
-        <p class="route-stop-address">${property?.service_address || 'Unknown address'}</p>
-        <p class="route-stop-service">${serviceText}</p>
-        <p class="route-stop-preferred">Preferred: ${preferredDay} ${preferredStatus}</p>
+        <h3>${escapeHtml(customer?.name || 'Unknown Customer')}</h3>
+        <p class="route-stop-address">${escapeHtml(property?.service_address || 'Unknown address')}</p>
+        <p class="route-stop-service">${escapeHtml(serviceText)}</p>
+        <p class="route-stop-preferred">Preferred: ${escapeHtml(preferredDay)} ${preferredStatus}</p>
       </div>
       ${canUpdateVisits ? `<div class="actions route-stop-actions">
-        <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
-        <button type="button" data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
-        <button type="button" data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
+        <button type="button" data-flow-visit-action="${escapeAttr(visit.visit_id)}:complete">Mark Completed</button>
+        <button type="button" data-flow-visit-action="${escapeAttr(visit.visit_id)}:skip">Mark Skipped</button>
+        <button type="button" data-flow-visit-action="${escapeAttr(visit.visit_id)}:skip-reschedule">Skip + Reschedule</button>
       </div>` : ''}
     </article>
   `;
@@ -174,7 +175,7 @@ function renderWorkerRoute(workerName, visits, customers, properties) {
     <section class="panel worker-route-section">
       <div class="customer-card-header">
         <div>
-          <h3>${workerName}</h3>
+          <h3>${escapeHtml(workerName)}</h3>
           <p>${completed} / ${visits.length} completed</p>
         </div>
       </div>
@@ -226,7 +227,7 @@ function enhanceTodayRoute(force = false) {
       <div class="customer-card-header route-summary-title-row">
         <div>
           <h2>${isOverdueView ? 'Overdue Visits' : 'Today’s Route'}</h2>
-          <p>${isOverdueView ? 'Scheduled visits older than today.' : `Daily operations view for ${date}.`}</p>
+          <p>${isOverdueView ? 'Scheduled visits older than today.' : `Daily operations view for ${escapeHtml(date)}.`}</p>
         </div>
         ${canCreateInvoices ? `<div class="actions route-billing-cta">
           <div class="billing-summary">

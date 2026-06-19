@@ -3,6 +3,7 @@ import {
   getScheduledVisitsForProperty,
   getStateSnapshot
 } from './data/repositories/visitReadRepository.js';
+import { escapeHtml } from './utils/renderSecurity.js';
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -45,9 +46,9 @@ function addNextScheduledVisitIndicators() {
     indicator.setAttribute('data-next-scheduled-visit', 'true');
 
     if (overdueVisit) {
-      indicator.innerHTML = `<span class="badge overdue">⚠ Overdue since ${overdueVisit.visit_date}</span>`;
+      indicator.innerHTML = `<span class="badge overdue">⚠ Overdue since ${escapeHtml(overdueVisit.visit_date)}</span>`;
     } else if (nextVisit) {
-      indicator.innerHTML = `<span class="badge paid-up">Next scheduled visit: ${nextVisit.visit_date}</span>`;
+      indicator.innerHTML = `<span class="badge paid-up">Next scheduled visit: ${escapeHtml(nextVisit.visit_date)}</span>`;
     } else {
       indicator.innerHTML = '<span class="badge outstanding">No upcoming visit scheduled</span>';
     }

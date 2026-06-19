@@ -14,6 +14,7 @@ import {
   verifyAdminPin,
   verifyEmployeePin
 } from './services/pinVerificationService.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
@@ -63,7 +64,7 @@ function productionAuthLoginCard(message = '') {
       <section class="panel login-card">
         <h1>FieldCore Login</h1>
         <p>Production mode requires a Supabase user before company access or PIN shortcuts are available.</p>
-        ${message ? `<div class="flash">${message}</div>` : ''}
+        ${message ? `<div class="flash">${escapeHtml(message)}</div>` : ''}
         <form id="supabase-login-form" class="service-form">
           <h3>Supabase Account</h3>
           <label>Email
@@ -92,8 +93,8 @@ function productionMembershipBlockedCard(diagnostics) {
     <div class="login-shell">
       <section class="panel login-card">
         <h1>FieldCore Login</h1>
-        <p>${reason}</p>
-        <p>User ID: ${diagnostics.userId || 'unknown'}</p>
+        <p>${escapeHtml(reason)}</p>
+        <p>User ID: ${escapeHtml(diagnostics.userId || 'unknown')}</p>
         <button class="primary" data-supabase-logout>Logout</button>
       </section>
     </div>
@@ -106,8 +107,8 @@ function productionSessionSummary(diagnostics, user) {
     <div class="flash session-banner">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
         <div>
-          <strong>${user?.email || user?.id || 'Supabase user'}</strong>
-          <span style="color:#475569;font-size:0.95rem;">(${diagnostics.role || 'member'})</span>
+          <strong>${escapeHtml(user?.email || user?.id || 'Supabase user')}</strong>
+          <span style="color:#475569;font-size:0.95rem;">(${escapeHtml(diagnostics.role || 'member')})</span>
         </div>
         <button type="button" data-supabase-logout class="primary">Logout Supabase</button>
       </div>
@@ -157,7 +158,7 @@ async function loginCard() {
           <label>Employee
             <select name="employee_id" required>
               <option value="">Select employee</option>
-              ${employees.map((employee) => `<option value="${employee.employee_id}">${employee.name}</option>`).join('')}
+              ${employees.map((employee) => `<option value="${escapeAttr(employee.employee_id)}">${escapeHtml(employee.name)}</option>`).join('')}
             </select>
           </label>
           <label>Employee PIN

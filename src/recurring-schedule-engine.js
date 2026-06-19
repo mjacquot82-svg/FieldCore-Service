@@ -2,6 +2,7 @@ import {
   createRecurringGeneratedVisits,
   saveRecurringSchedule
 } from './services/scheduleService.js';
+import { escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const GENERATE_DAYS = 30;
@@ -256,7 +257,7 @@ function showHolidayConflicts() {
 
     const badge = document.createElement('p');
     badge.setAttribute('data-holiday-conflict', 'true');
-    badge.innerHTML = `<span class="badge overdue">⚠ Holiday conflict: ${visit.holiday_name}</span>`;
+    badge.innerHTML = `<span class="badge overdue">⚠ Holiday conflict: ${escapeHtml(visit.holiday_name)}</span>`;
 
     const statusLine = [...card.querySelectorAll('p')]
       .find((line) => line.textContent.trim().startsWith('Status:'));

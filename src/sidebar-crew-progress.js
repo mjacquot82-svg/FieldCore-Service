@@ -1,3 +1,5 @@
+import { escapeHtml } from './utils/renderSecurity.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
 
@@ -63,7 +65,7 @@ function renderCrewProgress() {
       <h2>Crew Progress Today</h2>
       ${progress.length ? progress.map(([name, totals]) => `
         <article class="crew-progress-row">
-          <span>${name}</span>
+          <span>${escapeHtml(name)}</span>
           <strong>${totals.completed} / ${totals.total} completed</strong>
         </article>
       `).join('') : '<p>No visits scheduled today.</p>'}

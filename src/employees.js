@@ -6,6 +6,7 @@ import {
   toggleEmployeeStatus,
   updateEmployeePin
 } from './data/repositories/employeeRepository.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 function syncEmployeeView(render) {
   if (typeof render === 'function') {
@@ -24,19 +25,19 @@ function employeeCard(employee, permissions) {
   const canWrite = Boolean(permissions?.employees?.update);
   const canDelete = Boolean(permissions?.employees?.delete);
   const actions = [
-    canWrite ? `<button data-employee-toggle="${employee.employee_id}">${employee.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>` : '',
-    canWrite ? `<button data-employee-pin="${employee.employee_id}">Change PIN</button>` : '',
-    canDelete ? `<button data-employee-delete="${employee.employee_id}">Delete</button>` : ''
+    canWrite ? `<button data-employee-toggle="${escapeAttr(employee.employee_id)}">${employee.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>` : '',
+    canWrite ? `<button data-employee-pin="${escapeAttr(employee.employee_id)}">Change PIN</button>` : '',
+    canDelete ? `<button data-employee-delete="${escapeAttr(employee.employee_id)}">Delete</button>` : ''
   ].filter(Boolean).join('');
 
   return `
     <article class="panel employee-card">
       <div class="customer-card-header">
         <div>
-          <h3>${employee.name}</h3>
-          <p>${employee.role || 'Worker'} · PIN set</p>
+          <h3>${escapeHtml(employee.name)}</h3>
+          <p>${escapeHtml(employee.role || 'Worker')} · PIN set</p>
         </div>
-        <span class="badge ${employee.status === 'active' ? 'paid-up' : 'outstanding'}">${employee.status}</span>
+        <span class="badge ${employee.status === 'active' ? 'paid-up' : 'outstanding'}">${escapeHtml(employee.status)}</span>
       </div>
       ${actions ? `<div class="actions">${actions}</div>` : ''}
     </article>

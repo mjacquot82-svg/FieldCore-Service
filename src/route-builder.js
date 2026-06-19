@@ -5,6 +5,7 @@ import {
   removeStopFromRoutes,
   saveRouteWithStops
 } from './services/routeService.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -66,7 +67,7 @@ function renderRouteDaySelect(selectedDay) {
 
 function renderRouteTargetOptions(savedRoutes, currentRouteId = '', employeesById = new Map()) {
   return savedRoutes.map((route) => `
-    <option value="${route.route_id}" ${route.route_id === currentRouteId ? 'selected' : ''}>${routeLabel(route, employeesById)}</option>
+    <option value="${escapeAttr(route.route_id)}" ${route.route_id === currentRouteId ? 'selected' : ''}>${escapeHtml(routeLabel(route, employeesById))}</option>
   `).join('');
 }
 
@@ -81,33 +82,33 @@ function renderVisitCheckbox(visit, customers, properties, routeAssignment, save
   const routeOptions = renderRouteTargetOptions(savedRoutes, assignedRoute?.route_id, employeesById);
   const routeActions = canAssign ? `
     <div class="route-stop-actions">
-      <select data-route-target="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>
+      <select data-route-target="${escapeAttr(visit.visit_id)}" ${savedRoutes.length ? '' : 'disabled'}>
         ${routeOptions || '<option value="">No saved routes</option>'}
       </select>
-      <button type="button" data-route-move-stop="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>${isRouted ? 'Reassign' : 'Assign'}</button>
-      ${isRouted ? `<button type="button" data-route-remove-stop="${visit.visit_id}">Remove from Route</button>` : ''}
+      <button type="button" data-route-move-stop="${escapeAttr(visit.visit_id)}" ${savedRoutes.length ? '' : 'disabled'}>${isRouted ? 'Reassign' : 'Assign'}</button>
+      ${isRouted ? `<button type="button" data-route-remove-stop="${escapeAttr(visit.visit_id)}">Remove from Route</button>` : ''}
     </div>
   ` : '';
 
   return `
     <article class="route-stop-card ${isRouted ? 'already-routed' : ''}">
       <label class="route-stop-select">
-        <input type="checkbox" name="visit_id" value="${visit.visit_id}" ${isRouted ? 'disabled' : ''} />
+        <input type="checkbox" name="visit_id" value="${escapeAttr(visit.visit_id)}" ${isRouted ? 'disabled' : ''} />
       </label>
       <div class="route-stop-main">
         <div class="route-stop-title-row">
-          <strong>${customer?.name || 'Unknown Customer'}</strong>
-          <span class="badge ${isRouted ? 'outstanding' : 'paid-up'}">${isRouted ? `Assigned to: ${workerName}` : 'Unassigned'}</span>
+          <strong>${escapeHtml(customer?.name || 'Unknown Customer')}</strong>
+          <span class="badge ${isRouted ? 'outstanding' : 'paid-up'}">${isRouted ? `Assigned to: ${escapeHtml(workerName)}` : 'Unassigned'}</span>
         </div>
-        <p>${property?.service_address || 'Unknown address'}</p>
+        <p>${escapeHtml(property?.service_address || 'Unknown address')}</p>
         <div class="route-stop-meta">
-          <span>${property?.recurring_frequency || 'one-time'}</span>
-          <span>${property?.service_type || 'Service'}</span>
+          <span>${escapeHtml(property?.recurring_frequency || 'one-time')}</span>
+          <span>${escapeHtml(property?.service_type || 'Service')}</span>
           <span>${currency(visit.price)}</span>
-          ${city ? `<span>${city}</span>` : ''}
-          ${assignedRoute ? `<span>${assignedRoute.name}</span>` : ''}
+          ${city ? `<span>${escapeHtml(city)}</span>` : ''}
+          ${assignedRoute ? `<span>${escapeHtml(assignedRoute.name)}</span>` : ''}
         </div>
-        ${visit.notes ? `<small>${visit.notes}</small>` : ''}
+        ${visit.notes ? `<small>${escapeHtml(visit.notes)}</small>` : ''}
         ${routeActions}
       </div>
     </article>
@@ -127,8 +128,8 @@ function renderSavedRoute(route, state) {
     <article class="panel route-summary-card">
       <div class="customer-card-header">
         <div>
-          <h3>${routeDay} · ${route.name}</h3>
-          <p>${routeWorkerLabel(route, employeesById)} · preview ${route.route_date} · ${currency(routeTotal)}</p>
+          <h3>${escapeHtml(routeDay)} · ${escapeHtml(route.name)}</h3>
+          <p>${escapeHtml(routeWorkerLabel(route, employeesById))} · preview ${escapeHtml(route.route_date)} · ${currency(routeTotal)}</p>
         </div>
         <span class="badge paid-up">${routeVisits.length} stops</span>
       </div>
@@ -136,7 +137,7 @@ function renderSavedRoute(route, state) {
         ${routeVisits.map((visit) => {
           const property = properties[visit.property_id];
           const customer = customers[property?.customer_id];
-          return `<li><strong>${customer?.name || 'Unknown Customer'}</strong><span>${property?.service_address || 'Unknown address'} · ${visit.service_description}</span></li>`;
+          return `<li><strong>${escapeHtml(customer?.name || 'Unknown Customer')}</strong><span>${escapeHtml(property?.service_address || 'Unknown address')} · ${escapeHtml(visit.service_description)}</span></li>`;
         }).join('') || '<li>No stops found.</li>'}
       </ol>
     </article>
@@ -164,7 +165,7 @@ export function renderRouteBuilder(state, date = today(), permissions = {}) {
           <p>Build weekday routes by worker. The date is a preview for scheduled stops only.</p>
         </div>
         <label>Preview scheduled visits for
-          <input type="date" id="route-builder-date" value="${date}" />
+          <input type="date" id="route-builder-date" value="${escapeAttr(date)}" />
         </label>
       </div>
 
@@ -192,7 +193,7 @@ export function renderRouteBuilder(state, date = today(), permissions = {}) {
             ${productionMode
               ? `<select name="employee_id" required>
                   <option value="">Select employee</option>
-                  ${activeEmployees.map((employee) => `<option value="${employee.employee_id}">${employee.name}</option>`).join('')}
+                  ${activeEmployees.map((employee) => `<option value="${escapeAttr(employee.employee_id)}">${escapeHtml(employee.name)}</option>`).join('')}
                 </select>`
               : '<input name="assigned_worker" placeholder="Worker name" />'
             }
@@ -201,15 +202,15 @@ export function renderRouteBuilder(state, date = today(), permissions = {}) {
             <input name="route_name" placeholder="North Route, Franklin Route, Commercial Route" required />
           </label>
         </div>
-        <h4>Scheduled stops for ${routeDay} preview (${date})</h4>
+        <h4>Scheduled stops for ${escapeHtml(routeDay)} preview (${escapeHtml(date)})</h4>
         <div class="route-stop-list">
           ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes, employeesById, permissions)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
       </form>` : '<article class="panel"><p>Your role can review saved routes but cannot create or modify route assignments.</p></article>'}
 
       <div class="route-section-header">
-        <h3>Saved ${routeDay} Routes</h3>
-        <span>${savedRoutes.length} routes for preview date ${date}</span>
+        <h3>Saved ${escapeHtml(routeDay)} Routes</h3>
+        <span>${savedRoutes.length} routes for preview date ${escapeHtml(date)}</span>
       </div>
       <div class="stack route-saved-stack">
         ${savedRoutes.length ? savedRoutes.map((route) => renderSavedRoute(route, state)).join('') : '<article class="panel"><p>No saved routes for this preview date yet.</p></article>'}

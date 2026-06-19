@@ -2,6 +2,7 @@ import { listCustomers } from './data/repositories/customerRepository.js';
 import { listOpenInvoices } from './data/repositories/invoiceRepository.js';
 import { readState } from './data/storage/local-state-adapter.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
+import { escapeHtml } from './utils/renderSecurity.js';
 
 const SESSION_KEY = 'fieldcore_current_session_v1';
 const AR_DASHBOARD_ID = 'ar-dashboard';
@@ -206,7 +207,7 @@ function renderCustomerCollectionRow(customer) {
     <article class="panel ar-customer-row">
       <div class="customer-card-header">
         <div>
-          <h3>${customer.name}</h3>
+          <h3>${escapeHtml(customer.name)}</h3>
           <p>${customer.invoices.length} open invoice${customer.invoices.length === 1 ? '' : 's'} · oldest ${customer.oldestDays} day${customer.oldestDays === 1 ? '' : 's'} overdue</p>
         </div>
         <span class="badge ${badgeClass}">${status}</span>
@@ -229,10 +230,10 @@ function renderInvoiceRiskRow(invoice, customers) {
   const isOverdue = invoice.ar_bucket !== 'current';
   return `
     <tr>
-      <td><strong>${invoice.invoice_number || 'Invoice'}</strong><br><span>${customerName}</span></td>
-      <td>${invoice.due_date || 'n/a'}</td>
+      <td><strong>${escapeHtml(invoice.invoice_number || 'Invoice')}</strong><br><span>${escapeHtml(customerName)}</span></td>
+      <td>${escapeHtml(invoice.due_date || 'n/a')}</td>
       <td>${isOverdue ? `${invoice.days_overdue} days` : 'Current'}</td>
-      <td>${invoice.ar_bucket}</td>
+      <td>${escapeHtml(invoice.ar_bucket)}</td>
       <td><strong>${currency(invoice.balance)}</strong></td>
     </tr>
   `;
@@ -311,7 +312,7 @@ function renderArDashboard() {
           <section class="panel">
             <h3>Recent Payments</h3>
             <div class="stack">
-              ${recentPayments.length ? recentPayments.map((payment) => `<article class="ar-payment-row"><strong>${currency(payment.amount)}</strong><span>${payment.payment_date || payment.created_at?.slice(0, 10) || 'No date'} · ${payment.method || 'Payment'}</span></article>`).join('') : '<p>No payments recorded yet.</p>'}
+              ${recentPayments.length ? recentPayments.map((payment) => `<article class="ar-payment-row"><strong>${currency(payment.amount)}</strong><span>${escapeHtml(payment.payment_date || payment.created_at?.slice(0, 10) || 'No date')} · ${escapeHtml(payment.method || 'Payment')}</span></article>`).join('') : '<p>No payments recorded yet.</p>'}
             </div>
           </section>
         </aside>

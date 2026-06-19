@@ -1,4 +1,5 @@
 import { updateSkipReason } from './data/repositories/visitRepository.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SKIP_REASONS = [
@@ -41,7 +42,7 @@ function showSkipReasonModal(visitId, action) {
       <p>This reason will be saved to the visit history.</p>
       <label>Skip reason
         <select id="skip-reason-select">
-          ${SKIP_REASONS.map((reason) => `<option value="${reason}">${reason}</option>`).join('')}
+          ${SKIP_REASONS.map((reason) => `<option value="${escapeAttr(reason)}">${escapeHtml(reason)}</option>`).join('')}
         </select>
       </label>
       <label id="skip-reason-other-label" hidden>Other reason
@@ -131,7 +132,7 @@ function showSkipReasonsOnCards() {
 
     const badge = document.createElement('p');
     badge.setAttribute('data-skip-reason-badge', 'true');
-    badge.innerHTML = `<span class="badge outstanding">Skip reason: ${visit.skip_reason}</span>`;
+    badge.innerHTML = `<span class="badge outstanding">Skip reason: ${escapeHtml(visit.skip_reason)}</span>`;
     statusLine.insertAdjacentElement('afterend', badge);
   });
 }

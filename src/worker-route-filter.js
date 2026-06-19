@@ -1,4 +1,5 @@
 import { isProductionMode } from './data/appMode.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const WORKER_FILTER_ID = 'worker-route-filter';
@@ -104,7 +105,7 @@ function applyWorkerFilter(section, state, workerValue) {
     const emptyCard = document.createElement('article');
     emptyCard.className = 'panel';
     emptyCard.setAttribute('data-worker-route-empty', 'true');
-    emptyCard.innerHTML = `<p>No assigned stops found for ${worker?.label || workerValue} on this date.</p>`;
+    emptyCard.innerHTML = `<p>No assigned stops found for ${escapeHtml(worker?.label || workerValue)} on this date.</p>`;
     section.querySelector('.stack')?.appendChild(emptyCard);
   }
 }
@@ -126,7 +127,7 @@ function injectWorkerFilter() {
       <label class="worker-route-filter-label">Assigned worker / route
         <select id="${WORKER_FILTER_ID}">
           <option value="">All scheduled stops</option>
-          ${workers.map((worker) => `<option value="${worker.value}">${worker.label}</option>`).join('')}
+          ${workers.map((worker) => `<option value="${escapeAttr(worker.value)}">${escapeHtml(worker.label)}</option>`).join('')}
         </select>
       </label>
     `);

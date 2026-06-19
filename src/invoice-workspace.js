@@ -4,6 +4,7 @@ import { listPayments } from './data/repositories/paymentRepository.js';
 import { listProperties, listVisits } from './data/repositories/visitReadRepository.js';
 import { getSession } from './role-pin-login.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
+import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -91,8 +92,8 @@ function renderGroupedServiceLines(visits) {
     const service = visit.service_description || 'Service visit';
     return `
       <li class="invoice-service-line">
-        <span class="invoice-service-date">${visit.visit_date || 'No date'}</span>
-        <strong>${service}</strong>
+        <span class="invoice-service-date">${escapeHtml(visit.visit_date || 'No date')}</span>
+        <strong>${escapeHtml(service)}</strong>
         <span class="invoice-service-price">${currency(visit.price)}</span>
       </li>
     `;
@@ -104,8 +105,8 @@ function renderPropertyServiceGroup(group) {
     <article class="invoice-service-group">
       <div class="invoice-service-group-header">
         <div>
-          <strong>${group.address}</strong>
-          <p>${group.serviceType} · ${group.visits.length} visit${group.visits.length === 1 ? '' : 's'}</p>
+          <strong>${escapeHtml(group.address)}</strong>
+          <p>${escapeHtml(group.serviceType)} · ${group.visits.length} visit${group.visits.length === 1 ? '' : 's'}</p>
         </div>
         <span>${currency(group.total)}</span>
       </div>
@@ -134,17 +135,17 @@ function renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId, 
   const isSelected = invoice.invoice_id === selectedInvoiceId;
 
   return `
-    <button type="button" class="invoice-list-card ${isSelected ? 'active' : ''}" data-select-invoice="${invoice.invoice_id}">
+    <button type="button" class="invoice-list-card ${isSelected ? 'active' : ''}" data-select-invoice="${escapeAttr(invoice.invoice_id)}">
       <div class="invoice-list-card-top">
         <div>
-          <strong>${invoice.invoice_number}</strong>
-          <span>${customerName}</span>
+          <strong>${escapeHtml(invoice.invoice_number)}</strong>
+          <span>${escapeHtml(customerName)}</span>
         </div>
-        <span class="badge ${getStatusClass(invoice)}">${invoice.payment_status || 'draft'}</span>
+        <span class="badge ${getStatusClass(invoice)}">${escapeHtml(invoice.payment_status || 'draft')}</span>
       </div>
       <div class="invoice-list-meta">
-        <span>Service: ${formatDateRange(invoiceVisits, invoice)}</span>
-        <span>Due: ${invoice.due_date || 'n/a'}</span>
+        <span>Service: ${escapeHtml(formatDateRange(invoiceVisits, invoice))}</span>
+        <span>Due: ${escapeHtml(invoice.due_date || 'n/a')}</span>
       </div>
       <div class="invoice-list-totals">
         <span>Total ${currency(invoice.total)}</span>
@@ -171,27 +172,27 @@ function renderInvoicePreview(invoice, customerMap, propertyMap, visits, payment
   const invoiceVisits = getInvoiceVisits(invoice, visits);
 
   return `
-    <aside class="panel invoice-preview-panel" data-selected-invoice="${invoice.invoice_id}">
+    <aside class="panel invoice-preview-panel" data-selected-invoice="${escapeAttr(invoice.invoice_id)}">
       <div class="invoice-preview-header">
         <div>
           <p class="eyebrow">Selected Invoice</p>
-          <h3>${invoice.invoice_number}</h3>
-          <p>${customerName}</p>
+          <h3>${escapeHtml(invoice.invoice_number)}</h3>
+          <p>${escapeHtml(customerName)}</p>
         </div>
-        <span class="badge ${getStatusClass(invoice)}">${status}</span>
+        <span class="badge ${getStatusClass(invoice)}">${escapeHtml(status)}</span>
       </div>
 
       <div class="invoice-preview-total-card">
         <span>Balance Due</span>
         <strong>${currency(balance)}</strong>
-        <p>${invoiceActionText(invoice, paymentTotals)}</p>
+        <p>${escapeHtml(invoiceActionText(invoice, paymentTotals))}</p>
       </div>
 
       <div class="invoice-card-grid invoice-preview-grid">
         <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
         <div><span>Paid</span><strong>${currency(paidAmount)}</strong></div>
-        <div><span>Invoice Date</span><strong>${invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a'}</strong></div>
-        <div><span>Due</span><strong>${invoice.due_date || 'n/a'}</strong></div>
+        <div><span>Invoice Date</span><strong>${escapeHtml(invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a')}</strong></div>
+        <div><span>Due</span><strong>${escapeHtml(invoice.due_date || 'n/a')}</strong></div>
       </div>
 
       ${renderServiceDetails(invoice, invoiceVisits, propertyMap)}
