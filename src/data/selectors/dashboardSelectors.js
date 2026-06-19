@@ -35,15 +35,23 @@ export function getDashboardMetrics(state) {
   const paidThisMonth = (state.payments || [])
     .filter((payment) => payment.payment_date >= monthStart && payment.payment_date <= monthEnd)
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const paymentTotalsByInvoice = (state.payments || []).reduce((totals, payment) => {
+    totals[payment.invoice_id] = Number((Number(totals[payment.invoice_id] || 0) + Number(payment.amount || 0)).toFixed(2));
+    return totals;
+  }, {});
+  const invoiceBalance = (invoice) => Math.max(0, Number((
+    Number(invoice.total || 0) - Number(paymentTotalsByInvoice[invoice.invoice_id] ?? invoice.amount_paid ?? 0)
+  ).toFixed(2)));
+  const openStatuses = ['draft', 'open', 'sent', 'partial', 'partially_paid', 'overdue'];
   const draftInvoices = state.invoices.filter((invoice) => invoice.payment_status === 'draft').length;
-  const unpaidInvoices = state.invoices.filter((invoice) => ['sent', 'partial', 'overdue', 'draft'].includes(invoice.payment_status)).length;
-  const overdueInvoices = state.invoices.filter((invoice) => invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today)).length;
+  const unpaidInvoices = state.invoices.filter((invoice) => openStatuses.includes(invoice.payment_status) && invoiceBalance(invoice) > 0).length;
+  const overdueInvoices = state.invoices.filter((invoice) => invoiceBalance(invoice) > 0 && (invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today))).length;
   const overdueAmount = state.invoices
-    .filter((invoice) => invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today))
-    .reduce((sum, invoice) => sum + (invoice.total - (invoice.amount_paid || 0)), 0);
+    .filter((invoice) => invoiceBalance(invoice) > 0 && (invoice.payment_status === 'overdue' || (invoice.payment_status !== 'paid' && invoice.due_date < today)))
+    .reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
   const totalOutstanding = state.invoices
     .filter((invoice) => invoice.payment_status !== 'paid')
-    .reduce((sum, invoice) => sum + (invoice.total - (invoice.amount_paid || 0)), 0);
+    .reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
 
   return {
     completedUnbilledVisits,

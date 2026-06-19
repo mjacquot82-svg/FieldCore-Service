@@ -1142,7 +1142,7 @@ create table if not exists public.invoices (
     subtotal >= 0 and tax >= 0 and total >= 0 and amount_paid >= 0
   ),
   constraint invoices_payment_status_check check (
-    payment_status in ('draft', 'sent', 'partial', 'paid', 'overdue', 'void')
+    payment_status in ('draft', 'open', 'sent', 'partial', 'partially_paid', 'paid', 'overdue', 'void', 'cancelled')
   )
 );
 
@@ -1154,6 +1154,25 @@ alter table public.invoices
 
 alter table public.invoices
   add column if not exists idempotency_key text;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'invoices_payment_status_check'
+      and conrelid = 'public.invoices'::regclass
+  ) then
+    alter table public.invoices
+      drop constraint invoices_payment_status_check;
+  end if;
+
+  alter table public.invoices
+    add constraint invoices_payment_status_check check (
+      payment_status in ('draft', 'open', 'sent', 'partial', 'partially_paid', 'paid', 'overdue', 'void', 'cancelled')
+    );
+end;
+$$;
 
 create table if not exists public.invoice_line_items (
   line_item_id text primary key default ('ili_' || replace(gen_random_uuid()::text, '-', '')),
@@ -1174,6 +1193,7 @@ create table if not exists public.payments (
   payment_id text primary key default ('pay_' || replace(gen_random_uuid()::text, '-', '')),
   company_id text not null references public.companies(company_id) on delete cascade,
   invoice_id text not null references public.invoices(invoice_id) on delete cascade,
+  idempotency_key text,
   amount numeric(12, 2) not null,
   payment_date date not null,
   method text not null default 'other',
@@ -1185,6 +1205,9 @@ create table if not exists public.payments (
     method in ('cash', 'check', 'card', 'ach', 'bank_transfer', 'online', 'other')
   )
 );
+
+alter table public.payments
+  add column if not exists idempotency_key text;
 
 create table if not exists public.company_invoice_counters (
   company_id text primary key references public.companies(company_id) on delete cascade,
@@ -1524,6 +1547,9 @@ create unique index if not exists invoice_line_items_company_visit_once_idx
 create index if not exists payments_company_id_idx on public.payments(company_id);
 create index if not exists payments_invoice_id_idx on public.payments(invoice_id);
 create index if not exists payments_company_payment_date_idx on public.payments(company_id, payment_date);
+create unique index if not exists payments_company_idempotency_idx
+  on public.payments(company_id, idempotency_key)
+  where idempotency_key is not null;
 
 create index if not exists shifts_company_id_idx on public.shifts(company_id);
 create index if not exists shifts_employee_started_idx on public.shifts(employee_id, started_at);
@@ -1800,6 +1826,32 @@ begin
       raise exception 'Invoice line item total does not match invoice subtotal.';
     end if;
 
+    insert into public.activity_events (
+      company_id,
+      customer_id,
+      invoice_id,
+      event_type,
+      title,
+      detail,
+      metadata
+    )
+    values (
+      target_company_id,
+      invoice_record.customer_id,
+      invoice_record.invoice_id,
+      'invoice.created',
+      'Invoice created',
+      'Invoice ' || invoice_record.invoice_number || ' created from completed visits',
+      jsonb_build_object(
+        'idempotency_key', target_idempotency_key,
+        'invoice_number', invoice_record.invoice_number,
+        'visit_ids', customer_record.visit_ids,
+        'subtotal', invoice_record.subtotal,
+        'tax', invoice_record.tax,
+        'total', invoice_record.total
+      )
+    );
+
     created_invoice_ids := array_append(created_invoice_ids, invoice_record.invoice_id);
   end loop;
 
@@ -1828,6 +1880,241 @@ $$;
 
 comment on function public.generate_billing_invoices(text, text[], text, date, date)
   is 'Atomically creates customer-grouped invoices and line items for completed visits, marks visits billed, and returns idempotent results for retries.';
+
+create or replace function public.invoice_status_for_balance(
+  invoice_total numeric,
+  amount_paid numeric,
+  due_date date,
+  current_status text default null
+)
+returns text
+language sql
+stable
+as $$
+  select case
+    when current_status in ('void', 'cancelled') then current_status
+    when round(coalesce(amount_paid, 0), 2) >= round(coalesce(invoice_total, 0), 2)
+      and round(coalesce(invoice_total, 0), 2) > 0 then 'paid'
+    when round(coalesce(amount_paid, 0), 2) > 0 then 'partially_paid'
+    when due_date is not null and due_date < current_date and current_status not in ('draft') then 'overdue'
+    when current_status in ('draft', 'sent', 'open') then current_status
+    else 'sent'
+  end
+$$;
+
+comment on function public.invoice_status_for_balance(numeric, numeric, date, text)
+  is 'Returns the durable invoice status from total, paid amount, due date, and current terminal/draft state.';
+
+create or replace function public.record_invoice_payment(
+  target_company_id text,
+  target_invoice_id text,
+  target_amount numeric,
+  target_payment_date date,
+  target_method text default 'other',
+  target_notes text default null,
+  target_idempotency_key text default null,
+  allow_overpayment boolean default false
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  invoice_record public.invoices%rowtype;
+  payment_record public.payments%rowtype;
+  existing_payment public.payments%rowtype;
+  current_paid numeric(12, 2);
+  next_paid numeric(12, 2);
+  balance_due numeric(12, 2);
+  next_status text;
+  previous_status text;
+begin
+  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
+    raise exception 'Active owner, admin, or manager membership is required for payment recording.';
+  end if;
+
+  if target_company_id is null or btrim(target_company_id) = '' then
+    raise exception 'company_id is required.';
+  end if;
+
+  if target_invoice_id is null or btrim(target_invoice_id) = '' then
+    raise exception 'invoice_id is required.';
+  end if;
+
+  if target_idempotency_key is null or btrim(target_idempotency_key) = '' then
+    raise exception 'idempotency_key is required.';
+  end if;
+
+  target_amount := round(coalesce(target_amount, 0), 2);
+  if target_amount <= 0 then
+    raise exception 'Payment amount must be greater than zero.';
+  end if;
+
+  target_payment_date := coalesce(target_payment_date, current_date);
+  target_method := coalesce(nullif(btrim(target_method), ''), 'other');
+
+  select *
+  into existing_payment
+  from public.payments
+  where company_id = target_company_id
+    and idempotency_key = target_idempotency_key
+  limit 1;
+
+  if found then
+    if existing_payment.invoice_id <> target_invoice_id
+      or round(existing_payment.amount, 2) <> target_amount then
+      raise exception 'Payment idempotency key was already used for a different payment.';
+    end if;
+
+    select *
+    into invoice_record
+    from public.invoices
+    where company_id = target_company_id
+      and invoice_id = target_invoice_id;
+
+    return jsonb_build_object(
+      'idempotent_replay', true,
+      'payment', to_jsonb(existing_payment),
+      'invoice', to_jsonb(invoice_record)
+    );
+  end if;
+
+  select *
+  into invoice_record
+  from public.invoices
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id
+  for update;
+
+  if not found then
+    raise exception 'Invoice was not found for this company.';
+  end if;
+
+  if invoice_record.payment_status in ('void', 'cancelled') then
+    raise exception 'Payments cannot be recorded against void or cancelled invoices.';
+  end if;
+
+  select round(coalesce(sum(amount), 0), 2)
+  into current_paid
+  from public.payments
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id;
+
+  balance_due := round(invoice_record.total - current_paid, 2);
+  if not allow_overpayment and target_amount > balance_due then
+    raise exception 'Payment exceeds invoice balance.';
+  end if;
+
+  insert into public.payments (
+    payment_id,
+    company_id,
+    invoice_id,
+    idempotency_key,
+    amount,
+    payment_date,
+    method,
+    notes
+  )
+  values (
+    'pay_' || replace(gen_random_uuid()::text, '-', ''),
+    target_company_id,
+    target_invoice_id,
+    target_idempotency_key,
+    target_amount,
+    target_payment_date,
+    target_method,
+    target_notes
+  )
+  returning * into payment_record;
+
+  select round(coalesce(sum(amount), 0), 2)
+  into next_paid
+  from public.payments
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id;
+
+  previous_status := invoice_record.payment_status;
+  next_status := public.invoice_status_for_balance(
+    invoice_record.total,
+    next_paid,
+    invoice_record.due_date,
+    invoice_record.payment_status
+  );
+
+  update public.invoices
+  set amount_paid = next_paid,
+      payment_status = next_status,
+      updated_at = now()
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id
+  returning * into invoice_record;
+
+  insert into public.activity_events (
+    company_id,
+    customer_id,
+    invoice_id,
+    payment_id,
+    event_type,
+    title,
+    detail,
+    metadata
+  )
+  values (
+    target_company_id,
+    invoice_record.customer_id,
+    invoice_record.invoice_id,
+    payment_record.payment_id,
+    'payment.recorded',
+    'Payment recorded',
+    'Payment recorded for invoice ' || invoice_record.invoice_number,
+    jsonb_build_object(
+      'amount', payment_record.amount,
+      'method', payment_record.method,
+      'idempotency_key', target_idempotency_key,
+      'invoice_status', invoice_record.payment_status,
+      'amount_paid', invoice_record.amount_paid
+    )
+  );
+
+  if previous_status is distinct from invoice_record.payment_status then
+    insert into public.activity_events (
+      company_id,
+      customer_id,
+      invoice_id,
+      payment_id,
+      event_type,
+      title,
+      detail,
+      metadata
+    )
+    values (
+      target_company_id,
+      invoice_record.customer_id,
+      invoice_record.invoice_id,
+      payment_record.payment_id,
+      'invoice.status_changed',
+      'Invoice status changed',
+      'Invoice ' || invoice_record.invoice_number || ' changed from ' || previous_status || ' to ' || invoice_record.payment_status,
+      jsonb_build_object(
+        'from_status', previous_status,
+        'to_status', invoice_record.payment_status,
+        'amount_paid', invoice_record.amount_paid,
+        'balance', round(invoice_record.total - invoice_record.amount_paid, 2)
+      )
+    );
+  end if;
+
+  return jsonb_build_object(
+    'idempotent_replay', false,
+    'payment', to_jsonb(payment_record),
+    'invoice', to_jsonb(invoice_record)
+  );
+end;
+$$;
+
+comment on function public.record_invoice_payment(text, text, numeric, date, text, text, text, boolean)
+  is 'Atomically records an idempotent invoice payment, prevents overpayment by default, updates durable invoice amount/status, and writes audit events.';
 
 create or replace trigger set_companies_updated_at
   before update on public.companies

@@ -1,13 +1,15 @@
 import { emit } from '../appEventBus.js';
 import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
-import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
+import { supabaseRpc, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
+import { syncInvoicesFromSupabase } from './invoiceRepository.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
 const PAYMENT_FIELDS = [
   'payment_id',
   'company_id',
   'invoice_id',
+  'idempotency_key',
   'amount',
   'payment_date',
   'method',
@@ -60,10 +62,23 @@ function normalizePaymentForSupabase(payment) {
     payment_id: payment.payment_id,
     company_id: payment.company_id,
     invoice_id: payment.invoice_id,
+    idempotency_key: payment.idempotency_key || null,
     amount: Number(payment.amount ?? 0),
     payment_date: payment.payment_date,
     method: payment.method || 'other'
   });
+}
+
+function buildPaymentIdempotencyKey(payment) {
+  if (payment.idempotency_key) return payment.idempotency_key;
+  return [
+    'payment',
+    payment.company_id,
+    payment.invoice_id,
+    Number(payment.amount ?? 0).toFixed(2),
+    payment.payment_date,
+    payment.method || 'other'
+  ].join(':');
 }
 
 async function readSupabasePayments(companyId) {
@@ -150,12 +165,60 @@ export async function createPayment(paymentInput = {}, metadata = {}) {
     payment_id: paymentInput.payment_id || makePaymentId(),
     company_id: paymentInput.company_id || companyId,
     invoice_id: paymentInput.invoice_id,
+    idempotency_key: paymentInput.idempotency_key || metadata.idempotencyKey,
     amount: Number(paymentInput.amount ?? 0),
     payment_date: paymentInput.payment_date || new Date().toISOString().slice(0, 10),
     method: paymentInput.method || 'other',
     notes: paymentInput.notes,
     created_at: paymentInput.created_at || new Date().toISOString()
   };
+  payment.idempotency_key = buildPaymentIdempotencyKey(payment);
+
+  if (isProductionMode()) {
+    const response = await supabaseRpc('record_invoice_payment', {
+      target_company_id: payment.company_id,
+      target_invoice_id: payment.invoice_id,
+      target_amount: payment.amount,
+      target_payment_date: payment.payment_date,
+      target_method: payment.method,
+      target_notes: payment.notes || null,
+      target_idempotency_key: payment.idempotency_key,
+      allow_overpayment: Boolean(paymentInput.allow_overpayment || metadata.allowOverpayment)
+    });
+    const result = requireRemoteResult(
+      response.configured && !response.error ? response.data : null,
+      response.error?.message || 'Production payment create failed.'
+    );
+    const payments = requireRemoteResult(
+      await readSupabasePayments(payment.company_id),
+      'Production payment read failed after payment create.'
+    ) || [];
+    const persistedPayment = requireRemoteResult(
+      normalizePaymentFromSupabase(result?.payment) || payments.find((item) => (
+        item.idempotency_key === payment.idempotency_key
+      )),
+      'Production payment RPC did not return a payment.'
+    );
+    await syncInvoicesFromSupabase();
+
+    writeLocalPayments(payments, {
+      ...metadata,
+      action: metadata.action || 'payment:create-rpc',
+      payment_id: persistedPayment?.payment_id,
+      idempotency_key: payment.idempotency_key
+    });
+
+    emit('payments:changed', {
+      action: metadata.eventAction || metadata.action || 'create-rpc',
+      payment_id: persistedPayment?.payment_id,
+      payment: clone(persistedPayment),
+      invoice: result?.invoice,
+      idempotentReplay: Boolean(result?.idempotent_replay),
+      metadata: clone(metadata)
+    });
+
+    return clone(persistedPayment);
+  }
 
   const persistedPayment = requireRemoteResult(
     await writeSupabasePayment(payment),
@@ -178,6 +241,10 @@ export async function createPayment(paymentInput = {}, metadata = {}) {
 }
 
 export async function updatePayment(paymentId, patch = {}, metadata = {}) {
+  if (isProductionMode()) {
+    throw new Error('Production payment updates require a dedicated reversal or adjustment workflow.');
+  }
+
   const state = readState();
   const sourcePayments = isProductionMode()
     ? await readSupabasePayments(await resolveRepositoryCompanyId())

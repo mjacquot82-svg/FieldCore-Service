@@ -37,8 +37,23 @@ function daysBetween(start, end) {
   return Math.max(0, Math.floor((endDate - startDate) / 86400000));
 }
 
-function invoiceBalance(invoice) {
-  return Math.max(0, Number((Number(invoice.total || 0) - Number(invoice.amount_paid || 0)).toFixed(2)));
+function paymentTotalsByInvoice(payments = []) {
+  return payments.reduce((totals, payment) => {
+    totals[payment.invoice_id] = Number((
+      Number(totals[payment.invoice_id] || 0) + Number(payment.amount || 0)
+    ).toFixed(2));
+    return totals;
+  }, {});
+}
+
+function invoicePaidAmount(invoice, paymentTotals = {}) {
+  const paymentTotal = paymentTotals[invoice.invoice_id];
+  if (paymentTotal !== undefined) return Number(paymentTotal || 0);
+  return Number(invoice.amount_paid || 0);
+}
+
+function invoiceBalance(invoice, paymentTotals = {}) {
+  return Math.max(0, Number((Number(invoice.total || 0) - invoicePaidAmount(invoice, paymentTotals)).toFixed(2)));
 }
 
 function invoiceAge(invoice, today = todayString()) {
@@ -46,8 +61,8 @@ function invoiceAge(invoice, today = todayString()) {
   return daysBetween(invoice.due_date, today);
 }
 
-function agingBucket(invoice, today = todayString()) {
-  const balance = invoiceBalance(invoice);
+function agingBucket(invoice, today = todayString(), paymentTotals = {}) {
+  const balance = invoiceBalance(invoice, paymentTotals);
   if (balance <= 0 || (invoice.payment_status || '') === 'paid') return 'paid';
   if (!invoice.due_date || invoice.due_date >= today) return 'current';
 
@@ -59,11 +74,18 @@ function agingBucket(invoice, today = todayString()) {
   return '90+';
 }
 
-function getOpenInvoices() {
+function getOpenInvoices(state) {
   const today = todayString();
+  const paymentTotals = paymentTotalsByInvoice(state.payments || []);
   return listOpenInvoices()
-    .filter((invoice) => invoiceBalance(invoice) > 0)
-    .map((invoice) => ({ ...invoice, ar_bucket: agingBucket(invoice, today), days_overdue: invoiceAge(invoice, today), balance: invoiceBalance(invoice) }))
+    .filter((invoice) => invoiceBalance(invoice, paymentTotals) > 0)
+    .map((invoice) => ({
+      ...invoice,
+      amount_paid: invoicePaidAmount(invoice, paymentTotals),
+      ar_bucket: agingBucket(invoice, today, paymentTotals),
+      days_overdue: invoiceAge(invoice, today),
+      balance: invoiceBalance(invoice, paymentTotals)
+    }))
     .sort((a, b) => {
       const bucketWeight = { '90+': 5, '61-90': 4, '31-60': 3, '8-30': 2, '1-7': 1, current: 0 };
       const diff = (bucketWeight[b.ar_bucket] || 0) - (bucketWeight[a.ar_bucket] || 0);
@@ -213,7 +235,7 @@ function renderArDashboard() {
   if (!state || !main) return;
 
   const customers = customerMap(listCustomers());
-  const openInvoices = getOpenInvoices();
+  const openInvoices = getOpenInvoices(state);
   const aging = summarizeAging(openInvoices);
   const customerSummaries = summarizeCustomers(openInvoices, customers);
   const totalAr = openInvoices.reduce((sum, invoice) => sum + Number(invoice.balance || 0), 0);

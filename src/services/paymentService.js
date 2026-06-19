@@ -1,4 +1,5 @@
 import { emit } from '../data/appEventBus.js';
+import { isProductionMode } from '../data/appMode.js';
 import { getInvoice, updateInvoicePaymentFields } from '../data/repositories/invoiceRepository.js';
 import { createPayment, listPaymentsByInvoice } from '../data/repositories/paymentRepository.js';
 
@@ -17,7 +18,7 @@ function getPaymentTotal(invoiceId) {
 function getPaymentStatus(invoice, amountPaid, requestedStatus) {
   const total = roundCurrency(invoice.total);
   if (amountPaid >= total && total > 0) return 'paid';
-  if (amountPaid > 0) return 'partial';
+  if (amountPaid > 0) return 'partially_paid';
   return requestedStatus === 'paid' ? 'paid' : requestedStatus;
 }
 
@@ -46,7 +47,8 @@ export async function updateInvoicePaymentStatus(invoiceId, nextStatus, metadata
       amount: paymentDelta,
       payment_date: new Date().toISOString().slice(0, 10),
       method: 'other',
-      notes: `Recorded from ${nextStatus} invoice action.`
+      notes: `Recorded from ${nextStatus} invoice action.`,
+      idempotency_key: metadata.idempotencyKey
     }, {
       ...metadata,
       action: metadata.action || 'payment:record-from-invoice-status',
@@ -54,6 +56,10 @@ export async function updateInvoicePaymentStatus(invoiceId, nextStatus, metadata
       invoice_id: invoiceId,
       payment_status: nextStatus
     });
+  }
+
+  if (isProductionMode()) {
+    return getInvoice(invoiceId);
   }
 
   const amountPaid = Math.min(roundCurrency(invoice.total), Math.max(targetAmount, getPaymentTotal(invoiceId)));
