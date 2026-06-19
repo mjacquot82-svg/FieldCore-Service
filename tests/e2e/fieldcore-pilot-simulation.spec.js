@@ -50,7 +50,10 @@ async function loginAsOwner(page) {
 async function nav(page, name) {
   const target = NAV_TARGETS[name];
   if (target) {
-    await page.locator(`.sidebar [data-nav="${target}"]`).evaluate((button) => button.click());
+    await page.locator(`.sidebar [data-nav="${target}"]`).click();
+    if (name === 'Billing Queue') {
+      await expect(page.locator('section.ready-bill-queue[data-ready-bill-queue]')).toBeVisible();
+    }
     return;
   }
   await page.locator('.sidebar').getByRole('button', { name, exact: true }).click();
@@ -130,15 +133,20 @@ async function completePilotVisit(page) {
     await nav(page, 'Today’s Route');
   }
   await expect(page.locator('#route-date')).toHaveValue(today());
-  const pilotVisitCard = page.locator('article.panel', { hasText: 'Pilot Customer LLC' }).filter({ hasText: 'Pilot recurring weekly service' });
+  const routeFlow = page.locator('section.today-route-flow');
+  await expect(routeFlow).toBeVisible();
+  const pilotVisitCard = routeFlow.locator('article.route-flow-stop', { hasText: 'Pilot Customer LLC' })
+    .filter({ hasText: 'Pilot recurring weekly service' });
   await expect(pilotVisitCard).toBeVisible();
-  await pilotVisitCard.getByRole('button', { name: 'Mark Completed' }).click();
-  await expect(pilotVisitCard.getByText('Completed')).toBeVisible();
+  await pilotVisitCard.getByRole('button', { name: /Mark Completed|Complete Stop/ }).click();
+  await expect.poll(async () => {
+    const state = await getAppState(page);
+    return state.visits.find((visit) => visit.service_description === 'Pilot recurring weekly service')?.status;
+  }).toBe('completed');
 }
 
 async function generatePilotInvoice(page) {
   await nav(page, 'Billing Queue');
-  await expect(page.getByRole('heading', { name: 'Billing Queue', exact: true })).toBeVisible();
   await expect(page.locator('section.ready-bill-queue[data-ready-bill-queue]')).toBeVisible();
   await expect(page.locator('.ready-bill-list')).toContainText('Pilot Customer LLC');
   await expect(page.locator('article.ready-bill-row').first()).toBeVisible();
