@@ -1,11 +1,12 @@
 -- FieldCore Service production schema for Supabase.
 -- Paste this file into the Supabase SQL Editor and run it as one script.
--- RLS policies are intentionally limited to company, membership, settings,
--- employee, service plan, customer, and property tables in this phase.
+-- RLS policies cover all company-scoped operational and financial tables.
 
 begin;
 
 create extension if not exists pgcrypto;
+
+set local check_function_bodies = off;
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -187,6 +188,294 @@ comment on function public.current_employee_name(text)
 comment on function public.company_has_any_memberships(text)
   is 'Security-definer helper used by RLS bootstrap policy to test whether a company already has memberships without recursive policy evaluation.';
 
+create or replace function public.membership_company_matches(target_company_id text, target_employee_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select target_employee_id is null
+    or exists (
+      select 1
+      from public.employees e
+      where e.company_id = target_company_id
+        and e.employee_id = target_employee_id
+    )
+$$;
+
+create or replace function public.property_company_matches(
+  target_company_id text,
+  target_customer_id text,
+  target_service_plan_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.customers c
+    where c.company_id = target_company_id
+      and c.customer_id = target_customer_id
+  )
+  and (
+    target_service_plan_id is null
+    or exists (
+      select 1
+      from public.service_plans sp
+      where sp.company_id = target_company_id
+        and sp.service_plan_id = target_service_plan_id
+    )
+  )
+$$;
+
+create or replace function public.route_company_matches(target_company_id text, target_employee_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select target_employee_id is null
+    or exists (
+      select 1
+      from public.employees e
+      where e.company_id = target_company_id
+        and e.employee_id = target_employee_id
+    )
+$$;
+
+create or replace function public.visit_company_matches(
+  target_company_id text,
+  target_property_id text,
+  target_route_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.properties p
+    where p.company_id = target_company_id
+      and p.property_id = target_property_id
+  )
+  and (
+    target_route_id is null
+    or exists (
+      select 1
+      from public.routes r
+      where r.company_id = target_company_id
+        and r.route_id = target_route_id
+    )
+  )
+$$;
+
+create or replace function public.route_stop_company_matches(
+  target_company_id text,
+  target_route_id text,
+  target_visit_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.routes r
+    where r.company_id = target_company_id
+      and r.route_id = target_route_id
+  )
+  and exists (
+    select 1
+    from public.visits v
+    where v.company_id = target_company_id
+      and v.visit_id = target_visit_id
+  )
+$$;
+
+create or replace function public.shift_company_matches(target_company_id text, target_employee_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.employees e
+    where e.company_id = target_company_id
+      and e.employee_id = target_employee_id
+  )
+$$;
+
+create or replace function public.invoice_company_matches(target_company_id text, target_customer_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.customers c
+    where c.company_id = target_company_id
+      and c.customer_id = target_customer_id
+  )
+$$;
+
+create or replace function public.invoice_line_item_company_matches(
+  target_company_id text,
+  target_invoice_id text,
+  target_visit_id text,
+  target_property_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.invoices i
+    where i.company_id = target_company_id
+      and i.invoice_id = target_invoice_id
+  )
+  and (
+    target_visit_id is null
+    or exists (
+      select 1
+      from public.visits v
+      where v.company_id = target_company_id
+        and v.visit_id = target_visit_id
+    )
+  )
+  and (
+    target_property_id is null
+    or exists (
+      select 1
+      from public.properties p
+      where p.company_id = target_company_id
+        and p.property_id = target_property_id
+    )
+  )
+$$;
+
+create or replace function public.payment_company_matches(target_company_id text, target_invoice_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.invoices i
+    where i.company_id = target_company_id
+      and i.invoice_id = target_invoice_id
+  )
+$$;
+
+create or replace function public.activity_event_company_matches(
+  target_company_id text,
+  target_customer_id text,
+  target_property_id text,
+  target_visit_id text,
+  target_invoice_id text,
+  target_payment_id text,
+  target_employee_id text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select (
+    target_customer_id is null
+    or exists (
+      select 1
+      from public.customers c
+      where c.company_id = target_company_id
+        and c.customer_id = target_customer_id
+    )
+  )
+  and (
+    target_property_id is null
+    or exists (
+      select 1
+      from public.properties p
+      where p.company_id = target_company_id
+        and p.property_id = target_property_id
+    )
+  )
+  and (
+    target_visit_id is null
+    or exists (
+      select 1
+      from public.visits v
+      where v.company_id = target_company_id
+        and v.visit_id = target_visit_id
+    )
+  )
+  and (
+    target_invoice_id is null
+    or exists (
+      select 1
+      from public.invoices i
+      where i.company_id = target_company_id
+        and i.invoice_id = target_invoice_id
+    )
+  )
+  and (
+    target_payment_id is null
+    or exists (
+      select 1
+      from public.payments pmt
+      where pmt.company_id = target_company_id
+        and pmt.payment_id = target_payment_id
+    )
+  )
+  and (
+    target_employee_id is null
+    or exists (
+      select 1
+      from public.employees e
+      where e.company_id = target_company_id
+        and e.employee_id = target_employee_id
+    )
+  )
+$$;
+
+comment on function public.membership_company_matches(text, text)
+  is 'Returns true when a membership employee link is empty or belongs to the same company.';
+comment on function public.property_company_matches(text, text, text)
+  is 'Returns true when property customer and optional service plan references belong to the same company.';
+comment on function public.route_company_matches(text, text)
+  is 'Returns true when a route employee link is empty or belongs to the same company.';
+comment on function public.visit_company_matches(text, text, text)
+  is 'Returns true when visit property and optional route references belong to the same company.';
+comment on function public.route_stop_company_matches(text, text, text)
+  is 'Returns true when route stop route and visit references belong to the same company.';
+comment on function public.shift_company_matches(text, text)
+  is 'Returns true when a shift employee reference belongs to the same company.';
+comment on function public.invoice_company_matches(text, text)
+  is 'Returns true when an invoice customer reference belongs to the same company.';
+comment on function public.invoice_line_item_company_matches(text, text, text, text)
+  is 'Returns true when invoice line item invoice, visit, and property references belong to the same company.';
+comment on function public.payment_company_matches(text, text)
+  is 'Returns true when a payment invoice reference belongs to the same company.';
+comment on function public.activity_event_company_matches(text, text, text, text, text, text, text)
+  is 'Returns true when all optional activity event references belong to the same company.';
+
 alter table public.companies enable row level security;
 alter table public.company_memberships enable row level security;
 
@@ -235,6 +524,7 @@ create policy "authenticated users can create initial owner membership"
     user_id = auth.uid()
     and role = 'owner'
     and status = 'active'
+    and public.membership_company_matches(company_id, employee_id)
     and not public.company_has_any_memberships(company_id)
   );
 
@@ -244,7 +534,10 @@ create policy "owners can manage company memberships"
   for all
   to authenticated
   using (public.has_company_role(company_id, array['owner']))
-  with check (public.has_company_role(company_id, array['owner']));
+  with check (
+    public.has_company_role(company_id, array['owner'])
+    and public.membership_company_matches(company_id, employee_id)
+  );
 
 alter table public.company_settings enable row level security;
 alter table public.employees enable row level security;
@@ -536,11 +829,14 @@ create policy "owners admins and managers can insert properties"
   for insert
   to authenticated
   with check (
-    public.has_company_role(company_id, array['owner', 'admin'])
-    or (
-      public.has_company_role(company_id, array['manager'])
-      and status = 'active'
+    (
+      public.has_company_role(company_id, array['owner', 'admin'])
+      or (
+        public.has_company_role(company_id, array['manager'])
+        and status = 'active'
+      )
     )
+    and public.property_company_matches(company_id, customer_id, service_plan_id)
   );
 
 drop policy if exists "owners admins and managers can update properties" on public.properties;
@@ -556,11 +852,14 @@ create policy "owners admins and managers can update properties"
     )
   )
   with check (
-    public.has_company_role(company_id, array['owner', 'admin'])
-    or (
-      public.has_company_role(company_id, array['manager'])
-      and status = 'active'
+    (
+      public.has_company_role(company_id, array['owner', 'admin'])
+      or (
+        public.has_company_role(company_id, array['manager'])
+        and status = 'active'
+      )
     )
+    and public.property_company_matches(company_id, customer_id, service_plan_id)
   );
 
 drop policy if exists "owners and admins can delete properties" on public.properties;
@@ -758,7 +1057,10 @@ create policy "owners admins and managers can manage routes"
   for all
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.route_company_matches(company_id, employee_id)
+  );
 
 drop policy if exists "employees can read assigned routes" on public.routes;
 create policy "employees can read assigned routes"
@@ -776,7 +1078,10 @@ create policy "owners admins and managers can manage visits"
   for all
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.visit_company_matches(company_id, property_id, route_id)
+  );
 
 drop policy if exists "employees can read assigned visits" on public.visits;
 create policy "employees can read assigned visits"
@@ -813,6 +1118,32 @@ create table if not exists public.route_stops (
   constraint route_stops_stop_order_check check (stop_order >= 0),
   constraint route_stops_route_visit_key unique (route_id, visit_id)
 );
+
+alter table public.route_stops enable row level security;
+
+drop policy if exists "owners admins and managers can manage route stops" on public.route_stops;
+create policy "owners admins and managers can manage route stops"
+  on public.route_stops
+  for all
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.route_stop_company_matches(company_id, route_id, visit_id)
+  );
+
+drop policy if exists "employees can read assigned route stops" on public.route_stops;
+create policy "employees can read assigned route stops"
+  on public.route_stops
+  for select
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and (
+      public.is_assigned_route(company_id, route_id)
+      or public.is_assigned_visit(company_id, visit_id)
+    )
+  );
 
 create table if not exists public.invoices (
   invoice_id text primary key default ('inv_' || replace(gen_random_uuid()::text, '-', '')),
@@ -889,7 +1220,10 @@ create policy "owners admins and managers can insert invoices"
   on public.invoices
   for insert
   to authenticated
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.invoice_company_matches(company_id, customer_id)
+  );
 
 drop policy if exists "owners admins and managers can update invoices" on public.invoices;
 create policy "owners admins and managers can update invoices"
@@ -897,7 +1231,10 @@ create policy "owners admins and managers can update invoices"
   for update
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.invoice_company_matches(company_id, customer_id)
+  );
 
 drop policy if exists "owners and admins can delete invoices" on public.invoices;
 create policy "owners and admins can delete invoices"
@@ -918,7 +1255,10 @@ create policy "owners admins and managers can insert invoice line items"
   on public.invoice_line_items
   for insert
   to authenticated
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.invoice_line_item_company_matches(company_id, invoice_id, visit_id, property_id)
+  );
 
 drop policy if exists "owners admins and managers can update invoice line items" on public.invoice_line_items;
 create policy "owners admins and managers can update invoice line items"
@@ -926,7 +1266,10 @@ create policy "owners admins and managers can update invoice line items"
   for update
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.invoice_line_item_company_matches(company_id, invoice_id, visit_id, property_id)
+  );
 
 drop policy if exists "owners admins and managers can delete invoice line items" on public.invoice_line_items;
 create policy "owners admins and managers can delete invoice line items"
@@ -947,7 +1290,10 @@ create policy "owners admins and managers can insert payments"
   on public.payments
   for insert
   to authenticated
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.payment_company_matches(company_id, invoice_id)
+  );
 
 drop policy if exists "owners admins and managers can update payments" on public.payments;
 create policy "owners admins and managers can update payments"
@@ -955,7 +1301,10 @@ create policy "owners admins and managers can update payments"
   for update
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.payment_company_matches(company_id, invoice_id)
+  );
 
 drop policy if exists "owners and admins can delete payments" on public.payments;
 create policy "owners and admins can delete payments"
@@ -975,6 +1324,79 @@ create table if not exists public.shifts (
   updated_at timestamptz not null default now(),
   constraint shifts_ended_after_started_check check (ended_at is null or ended_at >= started_at)
 );
+
+alter table public.shifts enable row level security;
+
+drop policy if exists "owners admins and managers can read shifts" on public.shifts;
+create policy "owners admins and managers can read shifts"
+  on public.shifts
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert shifts" on public.shifts;
+create policy "owners admins and managers can insert shifts"
+  on public.shifts
+  for insert
+  to authenticated
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.shift_company_matches(company_id, employee_id)
+  );
+
+drop policy if exists "owners admins and managers can update shifts" on public.shifts;
+create policy "owners admins and managers can update shifts"
+  on public.shifts
+  for update
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.shift_company_matches(company_id, employee_id)
+  );
+
+drop policy if exists "owners and admins can delete shifts" on public.shifts;
+create policy "owners and admins can delete shifts"
+  on public.shifts
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "employees can read own shifts" on public.shifts;
+create policy "employees can read own shifts"
+  on public.shifts
+  for select
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and employee_id = public.current_employee_id(company_id)
+  );
+
+drop policy if exists "employees can insert own shifts" on public.shifts;
+create policy "employees can insert own shifts"
+  on public.shifts
+  for insert
+  to authenticated
+  with check (
+    public.current_company_role(company_id) = 'employee'
+    and employee_id = public.current_employee_id(company_id)
+    and public.shift_company_matches(company_id, employee_id)
+  );
+
+drop policy if exists "employees can update own shifts" on public.shifts;
+create policy "employees can update own shifts"
+  on public.shifts
+  for update
+  to authenticated
+  using (
+    public.current_company_role(company_id) = 'employee'
+    and employee_id = public.current_employee_id(company_id)
+  )
+  with check (
+    public.current_company_role(company_id) = 'employee'
+    and employee_id = public.current_employee_id(company_id)
+    and public.shift_company_matches(company_id, employee_id)
+  );
 
 create unique index if not exists shifts_one_active_shift_per_employee_idx
   on public.shifts(employee_id)
@@ -997,6 +1419,40 @@ create table if not exists public.activity_events (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.activity_events enable row level security;
+
+drop policy if exists "owners admins and managers can read activity events" on public.activity_events;
+create policy "owners admins and managers can read activity events"
+  on public.activity_events
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can insert activity events" on public.activity_events;
+create policy "owners admins and managers can insert activity events"
+  on public.activity_events
+  for insert
+  to authenticated
+  with check (
+    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    and public.activity_event_company_matches(
+      company_id,
+      customer_id,
+      property_id,
+      visit_id,
+      invoice_id,
+      payment_id,
+      employee_id
+    )
+  );
+
+drop policy if exists "owners and admins can delete activity events" on public.activity_events;
+create policy "owners and admins can delete activity events"
+  on public.activity_events
+  for delete
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 create index if not exists company_settings_company_id_idx on public.company_settings(company_id);
 
