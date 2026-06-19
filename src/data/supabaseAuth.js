@@ -143,6 +143,37 @@ export async function signInWithPassword(email, password) {
   return { session, error: null, configured: true };
 }
 
+export async function signUpWithPassword(email, password) {
+  const response = await authRequest('signup', {
+    method: 'POST',
+    body: {
+      email,
+      password
+    }
+  });
+
+  if (!response.configured || response.error) return { session: null, user: null, error: response.error, configured: response.configured };
+
+  const session = normalizeAuthSession(response.data);
+  if (session) writeStoredAuthSession(session);
+
+  logOperationalEvent({
+    category: 'authentication',
+    severity: session ? 'info' : 'warning',
+    action: session ? 'sign-up-success' : 'sign-up-needs-confirmation',
+    message: session ? 'Supabase user signed up.' : 'Supabase sign-up completed without an immediate session.',
+    userMessage: session ? '' : 'Check your email to confirm your account, then sign in.',
+    details: { userId: session?.user?.id || response.data?.user?.id || null, email: session?.user?.email || response.data?.user?.email || null }
+  });
+
+  return {
+    session,
+    user: response.data?.user || session?.user || null,
+    error: null,
+    configured: true
+  };
+}
+
 export async function refreshAuthSession(session = readStoredAuthSession()) {
   if (!session?.refresh_token) return { session: null, error: null, configured: Boolean(getSupabaseConfig()) };
 

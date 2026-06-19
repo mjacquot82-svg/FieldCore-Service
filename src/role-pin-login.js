@@ -7,15 +7,18 @@ import { validateRepositoryAuthContext } from './data/repositoryContext.js';
 import {
   getAuthenticatedUser,
   signInWithPassword,
+  signUpWithPassword,
   signOut
 } from './data/supabaseAuth.js';
 import { isSupabaseConfigured } from './data/supabaseClient.js';
+import { createProductionOwnerCompany } from './services/companyOnboardingService.js';
 import {
   verifyAdminPin,
   verifyEmployeePin
 } from './services/pinVerificationService.js';
 import {
   formatUserError,
+  logOperationalError,
   logOperationalEvent
 } from './services/operationalLogger.js';
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
@@ -68,10 +71,10 @@ function productionAuthLoginCard(message = '') {
     <div class="login-shell">
       <section class="panel login-card">
         <h1>FieldCore Login</h1>
-        <p>Production mode requires a Supabase user before company access or PIN shortcuts are available.</p>
+        <p>Production mode requires a Supabase account before company access or PIN shortcuts are available.</p>
         ${message ? `<div class="flash">${escapeHtml(message)}</div>` : ''}
         <form id="supabase-login-form" class="service-form">
-          <h3>Supabase Account</h3>
+          <h3>Sign In</h3>
           <label>Email
             <input name="email" type="email" autocomplete="email" required />
           </label>
@@ -79,6 +82,72 @@ function productionAuthLoginCard(message = '') {
             <input name="password" type="password" autocomplete="current-password" required />
           </label>
           <button class="primary" type="submit">Login</button>
+        </form>
+        <form id="supabase-signup-form" class="service-form">
+          <h3>Create Owner Account</h3>
+          <label>Email
+            <input name="email" type="email" autocomplete="email" required />
+          </label>
+          <label>Password
+            <input name="password" type="password" autocomplete="new-password" minlength="6" required />
+          </label>
+          <button class="primary" type="submit">Sign Up</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function productionCreateCompanyCard(diagnostics, user) {
+  const reason = !diagnostics.membershipActive
+    ? 'No company is linked to this account yet.'
+    : !diagnostics.membershipUserLinked
+      ? 'The active company membership is not linked to this Supabase user.'
+      : !diagnostics.companyResolved
+        ? 'No company could be resolved for this Supabase user.'
+        : 'This Supabase user is not ready for production access.';
+
+  return `
+    <div class="login-shell">
+      <section class="panel login-card">
+        <div class="flash session-banner">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+            <div>
+              <strong>${escapeHtml(user?.email || user?.id || 'Supabase user')}</strong>
+              <span style="color:#475569;font-size:0.95rem;">(no company)</span>
+            </div>
+            <button type="button" data-supabase-logout class="primary">Logout Supabase</button>
+          </div>
+        </div>
+        <h1>Create Company</h1>
+        <p>${escapeHtml(reason)} Create your company to continue into FieldCore.</p>
+        <form id="company-onboarding-form" class="service-form">
+          <h3>Company Setup</h3>
+          <label>Company Name
+            <input name="company_name" autocomplete="organization" required />
+          </label>
+          <label>Owner/Admin PIN
+            <input name="admin_pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="4 digits" required />
+          </label>
+          <label>Confirm PIN
+            <input name="confirm_admin_pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="4 digits" required />
+          </label>
+          <label>Invoice Prefix
+            <input name="invoice_prefix" maxlength="8" value="FC" required />
+          </label>
+          <label>Default Due Days
+            <input name="default_due_days" type="number" min="0" max="365" value="15" required />
+          </label>
+          <label>Tax Rate
+            <input name="tax_rate" type="number" min="0" max="1" step="0.000001" value="0" required />
+          </label>
+          <label>Payroll Week Start
+            <select name="payroll_week_start">
+              <option value="sunday">Sunday</option>
+              <option value="monday">Monday</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">Create Company</button>
         </form>
       </section>
     </div>
@@ -133,6 +202,8 @@ async function loginCard() {
   if (isProductionMode()) {
     if (!isSupabaseConfigured()) return productionAuthLoginCard('Supabase is not configured.');
     if (!diagnostics.authenticated || !diagnostics.transportAuthenticated) return productionAuthLoginCard();
+    const user = await getAuthenticatedUser();
+    if (!diagnostics.membershipActive && diagnostics.userId) return productionCreateCompanyCard(diagnostics, user);
     if (!diagnostics.ready) return productionMembershipBlockedCard(diagnostics);
   }
 
@@ -205,12 +276,70 @@ export function bindLoginEvents() {
     });
   }
 
+  const supabaseSignupForm = document.querySelector('#supabase-signup-form');
+  if (supabaseSignupForm) {
+    supabaseSignupForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(supabaseSignupForm);
+      const email = String(formData.get('email') || '').trim();
+      const password = String(formData.get('password') || '');
+      const result = await signUpWithPassword(email, password);
+
+      if (result.error) {
+        window.alert(formatUserError(result.error, 'Sign up failed. Check your email and password and try again.'));
+        return;
+      }
+
+      if (!result.session) {
+        window.alert('Check your email to confirm your account, then sign in.');
+        return;
+      }
+
+      window.location.reload();
+    });
+  }
+
   document.querySelectorAll('[data-supabase-logout]').forEach((button) => {
     button.addEventListener('click', async () => {
       await clearAuthenticatedSession();
       window.location.reload();
     });
   });
+
+  const onboardingForm = document.querySelector('#company-onboarding-form');
+  if (onboardingForm) {
+    onboardingForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submitButton = onboardingForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      const formData = new FormData(onboardingForm);
+
+      try {
+        await createProductionOwnerCompany({
+          companyName: formData.get('company_name'),
+          adminPin: formData.get('admin_pin'),
+          confirmAdminPin: formData.get('confirm_admin_pin'),
+          invoicePrefix: formData.get('invoice_prefix'),
+          defaultDueDays: formData.get('default_due_days'),
+          taxRate: formData.get('tax_rate'),
+          payrollWeekStart: formData.get('payroll_week_start')
+        });
+        clearSession();
+        window.location.reload();
+      } catch (error) {
+        logOperationalError(
+          'onboarding',
+          'company-onboarding-submit-failed',
+          error,
+          {},
+          'Company setup could not be completed.'
+        );
+        window.alert(formatUserError(error, 'Company setup could not be completed. Please try again or contact support.'));
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+    });
+  }
 
   const adminForm = document.querySelector('#admin-login-form');
   if (adminForm) {

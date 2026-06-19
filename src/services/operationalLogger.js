@@ -12,6 +12,7 @@ const CATEGORIES = new Set([
   'billing',
   'payments',
   'settings',
+  'onboarding',
   'startup',
   'synchronization'
 ]);

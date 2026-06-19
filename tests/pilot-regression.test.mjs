@@ -244,6 +244,95 @@ test('production requires Supabase auth and active membership', async () => {
   assert.equal(ready.ready, true);
 });
 
+test('production sign-up stores returned Supabase session', async () => {
+  reset({ mode: 'production' });
+  window.FIELDCORE_SUPABASE_CONFIG = { url: 'https://example.supabase.co', anonKey: 'anon-test', mode: 'production' };
+  globalThis.fetch = async (url, options = {}) => {
+    assert.match(String(url), /\/auth\/v1\/signup$/);
+    assert.equal(options.method, 'POST');
+    return jsonResponse({
+      access_token: 'signup-access-token',
+      refresh_token: 'signup-refresh-token',
+      expires_in: 3600,
+      token_type: 'bearer',
+      user: { id: 'user_signup', email: 'new-owner@example.test' }
+    });
+  };
+  const { signUpWithPassword, getCurrentAuthSession } = await import('../src/data/supabaseAuth.js');
+
+  const result = await signUpWithPassword('new-owner@example.test', 'password-1');
+  const session = await getCurrentAuthSession();
+
+  assert.equal(result.session.access_token, 'signup-access-token');
+  assert.equal(session.access_token, 'signup-access-token');
+  assert.equal(session.user.id, 'user_signup');
+});
+
+test('production onboarding creates company owner membership and settings', async () => {
+  const created = {
+    company: null,
+    membership: null,
+    settings: null
+  };
+  const requests = configureProduction({
+    user: { id: 'user_new_owner', email: 'owner-new@example.test' },
+    membership: null,
+    handlers: {
+      fetch(request) {
+        if (request.url.includes('/rest/v1/company_memberships')) {
+          if (request.method === 'POST') {
+            created.membership = request.body[0];
+            return jsonResponse([created.membership]);
+          }
+          return jsonResponse(created.membership ? [created.membership] : []);
+        }
+        if (request.url.includes('/rest/v1/company_settings')) {
+          created.settings = request.body[0];
+          return jsonResponse([created.settings]);
+        }
+        if (request.url.includes('/rest/v1/companies')) {
+          created.company = request.body[0];
+          return jsonResponse([created.company]);
+        }
+        return null;
+      }
+    }
+  });
+  const { createProductionOwnerCompany } = await import('../src/services/companyOnboardingService.js');
+  const { validateRepositoryAuthContext } = await import('../src/data/repositoryContext.js');
+  const { verifyAdminPin } = await import('../src/services/pinVerificationService.js');
+
+  const result = await createProductionOwnerCompany({
+    companyName: 'New Owner Lawn Care',
+    adminPin: '2468',
+    confirmAdminPin: '2468',
+    invoicePrefix: 'NOL',
+    defaultDueDays: 10,
+    taxRate: 0.075,
+    payrollWeekStart: 'monday'
+  });
+  const state = readState();
+
+  assert.equal(result.company.name, 'New Owner Lawn Care');
+  assert.equal(result.membership.user_id, 'user_new_owner');
+  assert.equal(result.membership.role, 'owner');
+  assert.equal(result.membership.status, 'active');
+  assert.equal(result.settings.invoice_prefix, 'NOL');
+  assert.equal(result.settings.default_due_days, 10);
+  assert.equal(result.settings.tax_rate, 0.075);
+  assert.equal(result.settings.payroll_week_start, 'monday');
+  assert.equal(result.settings.admin_pin, null);
+  assert.match(result.settings.admin_pin_hash, /^pbkdf2-sha256\$/);
+  assert.equal(state.company.company_id, result.company.company_id);
+  assert.equal(state.company_memberships[0].membership_id, result.membership.membership_id);
+  assert.equal(state.settings.company_id, result.company.company_id);
+  assert.equal((await validateRepositoryAuthContext()).ready, true);
+  assert.equal(await verifyAdminPin('2468'), true);
+  assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/companies')));
+  assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/company_memberships')));
+  assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/company_settings')));
+});
+
 test('role permission matrix protects financial and admin workflows', async () => {
   const { getUiPermissions } = await import('../src/services/uiPermissionService.js');
 
