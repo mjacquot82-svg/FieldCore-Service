@@ -71,14 +71,7 @@ function normalizePaymentForSupabase(payment) {
 
 function buildPaymentIdempotencyKey(payment) {
   if (payment.idempotency_key) return payment.idempotency_key;
-  return [
-    'payment',
-    payment.company_id,
-    payment.invoice_id,
-    Number(payment.amount ?? 0).toFixed(2),
-    payment.payment_date,
-    payment.method || 'other'
-  ].join(':');
+  return `payment-request:${payment.payment_id || crypto.randomUUID()}`;
 }
 
 async function readSupabasePayments(companyId) {

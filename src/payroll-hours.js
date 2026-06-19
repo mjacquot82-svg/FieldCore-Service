@@ -1,10 +1,12 @@
 import { updatePayrollWeekStart } from './data/repositories/settingsRepository.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
+import { isProductionMode } from './data/appMode.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
 
 function loadState() {
+  if (isProductionMode()) return null;
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {

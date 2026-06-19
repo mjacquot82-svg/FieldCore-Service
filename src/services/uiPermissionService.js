@@ -37,10 +37,10 @@ export function getUiPermissions(session) {
       'route-builder': operational,
       employees: operational,
       customers: operational,
-      batch: operational,
-      invoices: operational,
-      payments: operational,
-      'ar-dashboard': operational,
+      batch: elevated,
+      invoices: elevated,
+      payments: elevated,
+      'ar-dashboard': elevated,
       settings: operational,
       'worker-route': isEmployee
     },
@@ -76,14 +76,15 @@ export function getUiPermissions(session) {
       assign: operational
     },
     financials: {
-      read: operational,
-      createInvoices: operational,
-      recordPayments: operational,
-      exportInvoices: operational
+      read: elevated,
+      createInvoices: elevated,
+      recordPayments: elevated,
+      exportInvoices: elevated
     },
     settings: {
       read: operational,
       write: elevated,
+      operationalDiagnostics: elevated,
       resetDemoData: !isProductionMode() && elevated
     }
   };

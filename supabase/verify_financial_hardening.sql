@@ -151,7 +151,7 @@ begin
     125,
     date '2032-01-02',
     'card',
-    'Full payment retry',
+    'Full payment',
     'pay-full-1',
     false
   );
@@ -168,6 +168,25 @@ begin
   ) <> 1 then
     raise exception 'Payment retry created duplicate payment.';
   end if;
+
+  begin
+    perform public.record_invoice_payment(
+      'co_financial_hardening',
+      'inv_financial_full',
+      125,
+      date '2032-01-02',
+      'card',
+      'Full payment changed details',
+      'pay-full-1',
+      false
+    );
+    raise exception 'Mismatched payment replay was accepted.';
+  exception
+    when raise_exception then
+      if sqlerrm <> 'Payment idempotency key was already used for a different payment.' then
+        raise;
+      end if;
+  end;
 
   begin
     perform public.record_invoice_payment(

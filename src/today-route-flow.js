@@ -1,5 +1,6 @@
 import { completeVisit, skipAndRescheduleVisit as rescheduleVisit, skipVisit } from './services/visitLifecycleService.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
+import { isProductionMode } from './data/appMode.js';
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
@@ -11,6 +12,7 @@ const currency = (amount) => new Intl.NumberFormat('en-US', {
 }).format(amount || 0);
 
 function loadState() {
+  if (isProductionMode()) return null;
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {

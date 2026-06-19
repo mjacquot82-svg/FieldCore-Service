@@ -1,4 +1,5 @@
 import { updateSkipReason } from './data/repositories/visitRepository.js';
+import { isProductionMode } from './data/appMode.js';
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
@@ -14,6 +15,7 @@ const SKIP_REASONS = [
 let pendingSkip = null;
 
 function loadState() {
+  if (isProductionMode()) return null;
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {

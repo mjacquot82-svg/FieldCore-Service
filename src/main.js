@@ -38,7 +38,9 @@ import {
   scheduleVisit
 } from './data/repositories/visitRepository.js';
 import {
+  canUseLocalPersistenceFallback,
   getAppMode,
+  getAppModeRequirementMessage,
   getProductionModeRequirementMessage,
   isProductionMode
 } from './data/appMode.js';
@@ -61,8 +63,8 @@ import {
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const app = document.querySelector('#app');
-let state = isProductionMode() ? {} : loadState();
-let currentSession = isProductionMode() ? null : getSession();
+let state = canUseLocalPersistenceFallback() ? loadState() : {};
+let currentSession = canUseLocalPersistenceFallback() ? getSession() : null;
 let activeView = ['employee', 'worker'].includes(String(currentSession?.role || '').toLowerCase()) ? 'worker-route' : 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
@@ -709,7 +711,7 @@ function renderSettings() {
 
 function renderOperationalLogPanel() {
   const permissions = getUiPermissions(currentSession);
-  if (!permissions.settings.read) return '';
+  if (!permissions.settings.operationalDiagnostics) return '';
   const logs = getOperationalLogs().slice(-20).reverse();
   return `
     <hr />
@@ -906,6 +908,21 @@ async function initializeApp() {
     message: 'Application startup began.',
     details: { mode: getAppMode() }
   });
+
+  const modeRequirementMessage = getAppModeRequirementMessage();
+  if (modeRequirementMessage) {
+    logOperationalEvent({
+      category: 'startup',
+      severity: 'critical',
+      action: 'app-mode-invalid',
+      message: modeRequirementMessage,
+      userMessage: modeRequirementMessage,
+      details: { mode: getAppMode() }
+    });
+    productionModeBlockedReason = modeRequirementMessage;
+    await render();
+    return;
+  }
 
   if (isProductionMode()) {
     const diagnostics = await validateRepositoryAuthContext();

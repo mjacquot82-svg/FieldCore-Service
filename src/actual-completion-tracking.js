@@ -1,4 +1,5 @@
 import { updateCompletionMetadata } from './data/repositories/visitRepository.js';
+import { isProductionMode } from './data/appMode.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const originalSetItem = localStorage.setItem.bind(localStorage);
@@ -42,6 +43,11 @@ function getCompletedVisitMetadata(nextState) {
 }
 
 localStorage.setItem = function setItemWithActualCompletionTracking(key, value) {
+  if (isProductionMode()) {
+    originalSetItem(key, value);
+    return;
+  }
+
   if (key !== STORAGE_KEY) {
     originalSetItem(key, value);
     return;

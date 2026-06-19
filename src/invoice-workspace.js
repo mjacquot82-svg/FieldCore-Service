@@ -3,11 +3,14 @@ import {
   listInvoices,
   listOpenInvoices,
   markInvoiceSent,
-  recordInvoiceExport
+  recordInvoiceExport,
+  syncInvoicesFromSupabase
 } from './data/repositories/invoiceRepository.js';
-import { listPayments } from './data/repositories/paymentRepository.js';
+import { listPayments, syncPaymentsFromSupabase } from './data/repositories/paymentRepository.js';
 import { listProperties, listVisits } from './data/repositories/visitReadRepository.js';
+import { isProductionMode } from './data/appMode.js';
 import { getSession } from './role-pin-login.js';
+import { logOperationalEvent } from './services/operationalLogger.js';
 import { getUiPermissions } from './services/uiPermissionService.js';
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
@@ -285,6 +288,28 @@ function getSelectedInvoiceId(invoices) {
   return firstOpen?.invoice_id || invoices[0]?.invoice_id || '';
 }
 
+async function getFreshInvoiceWorkspaceData() {
+  if (isProductionMode()) {
+    await syncInvoicesFromSupabase();
+    await syncPaymentsFromSupabase();
+  }
+
+  const customers = listCustomers();
+  const properties = listProperties();
+  const visits = listVisits();
+  const payments = listPayments();
+
+  return {
+    customers,
+    properties,
+    visits,
+    paymentTotals: paymentTotalsByInvoice(payments),
+    customerMap: getCustomerMap(customers),
+    propertyMap: getPropertyMap(properties),
+    invoices: listInvoices().sort((a, b) => String(b.due_date || '').localeCompare(String(a.due_date || '')))
+  };
+}
+
 function enhanceInvoicesView() {
   const permissions = getUiPermissions(getSession());
   if (!permissions.financials.read) return;
@@ -381,20 +406,35 @@ function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visit
     button.addEventListener('click', async () => {
       if (!permissions?.financials?.exportInvoices) return;
       const selectedInvoiceId = section.querySelector('[data-selected-invoice]')?.dataset.selectedInvoice;
-      const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
+      const freshData = await getFreshInvoiceWorkspaceData();
+      const selectedInvoice = freshData.invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
       if (!selectedInvoice) return;
-      await recordInvoiceExport(selectedInvoice.invoice_id, { format: 'print', source: 'invoice-workspace' });
-      section.dataset.invoiceWorkspace = 'false';
       const popup = window.open('', '_blank');
       if (!popup) {
-        window.print();
+        logOperationalEvent({
+          category: 'billing',
+          severity: 'warning',
+          action: 'invoice-export-window-blocked',
+          message: 'Invoice export was attempted, but the print window was blocked.',
+          userMessage: 'The invoice print window was blocked. Allow popups and try export again.',
+          details: { invoiceId: selectedInvoice.invoice_id }
+        });
+        window.alert('The invoice print window was blocked. Allow popups and try export again.');
         scheduleEnhanceInvoicesView();
         return;
       }
-      popup.document.write(renderPrintableInvoice(selectedInvoice, customerMap, propertyMap, visits, paymentTotals));
+      popup.document.write(renderPrintableInvoice(
+        selectedInvoice,
+        freshData.customerMap,
+        freshData.propertyMap,
+        freshData.visits,
+        freshData.paymentTotals
+      ));
       popup.document.close();
       popup.focus();
       popup.print();
+      await recordInvoiceExport(selectedInvoice.invoice_id, { format: 'print', source: 'invoice-workspace' });
+      section.dataset.invoiceWorkspace = 'false';
       scheduleEnhanceInvoicesView();
     });
   });
@@ -405,9 +445,10 @@ function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visit
     button.addEventListener('click', async () => {
       if (!permissions?.financials?.exportInvoices) return;
       const selectedInvoiceId = section.querySelector('[data-selected-invoice]')?.dataset.selectedInvoice;
-      const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
+      const freshData = await getFreshInvoiceWorkspaceData();
+      const selectedInvoice = freshData.invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
       if (!selectedInvoice) return;
-      const customer = customerMap[selectedInvoice.customer_id];
+      const customer = freshData.customerMap[selectedInvoice.customer_id];
       const defaultRecipient = selectedInvoice.sent_to || customer?.email || '';
       const sentTo = window.prompt('Sent to email or contact:', defaultRecipient);
       if (sentTo === null) return;

@@ -1,7 +1,10 @@
+import { isProductionMode } from './data/appMode.js';
+
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SYNC_EVENT_NAME = 'fieldcore:visit-status-sync';
 
 function readState() {
+  if (isProductionMode()) return null;
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {

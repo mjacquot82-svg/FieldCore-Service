@@ -1251,30 +1251,33 @@ alter table public.payments enable row level security;
 alter table public.company_invoice_counters enable row level security;
 
 drop policy if exists "owners admins and managers can read invoices" on public.invoices;
-create policy "owners admins and managers can read invoices"
+drop policy if exists "owners and admins can read invoices" on public.invoices;
+create policy "owners and admins can read invoices"
   on public.invoices
   for select
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can insert invoices" on public.invoices;
-create policy "owners admins and managers can insert invoices"
+drop policy if exists "owners and admins can insert invoices" on public.invoices;
+create policy "owners and admins can insert invoices"
   on public.invoices
   for insert
   to authenticated
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.invoice_company_matches(company_id, customer_id)
   );
 
 drop policy if exists "owners admins and managers can update invoices" on public.invoices;
-create policy "owners admins and managers can update invoices"
+drop policy if exists "owners and admins can update invoices" on public.invoices;
+create policy "owners and admins can update invoices"
   on public.invoices
   for update
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  using (public.has_company_role(company_id, array['owner', 'admin']))
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.invoice_company_matches(company_id, customer_id)
   );
 
@@ -1286,65 +1289,72 @@ create policy "owners and admins can delete invoices"
   using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can read invoice line items" on public.invoice_line_items;
-create policy "owners admins and managers can read invoice line items"
+drop policy if exists "owners and admins can read invoice line items" on public.invoice_line_items;
+create policy "owners and admins can read invoice line items"
   on public.invoice_line_items
   for select
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can insert invoice line items" on public.invoice_line_items;
-create policy "owners admins and managers can insert invoice line items"
+drop policy if exists "owners and admins can insert invoice line items" on public.invoice_line_items;
+create policy "owners and admins can insert invoice line items"
   on public.invoice_line_items
   for insert
   to authenticated
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.invoice_line_item_company_matches(company_id, invoice_id, visit_id, property_id)
   );
 
 drop policy if exists "owners admins and managers can update invoice line items" on public.invoice_line_items;
-create policy "owners admins and managers can update invoice line items"
+drop policy if exists "owners and admins can update invoice line items" on public.invoice_line_items;
+create policy "owners and admins can update invoice line items"
   on public.invoice_line_items
   for update
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  using (public.has_company_role(company_id, array['owner', 'admin']))
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.invoice_line_item_company_matches(company_id, invoice_id, visit_id, property_id)
   );
 
 drop policy if exists "owners admins and managers can delete invoice line items" on public.invoice_line_items;
-create policy "owners admins and managers can delete invoice line items"
+drop policy if exists "owners and admins can delete invoice line items" on public.invoice_line_items;
+create policy "owners and admins can delete invoice line items"
   on public.invoice_line_items
   for delete
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can read payments" on public.payments;
-create policy "owners admins and managers can read payments"
+drop policy if exists "owners and admins can read payments" on public.payments;
+create policy "owners and admins can read payments"
   on public.payments
   for select
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can insert payments" on public.payments;
-create policy "owners admins and managers can insert payments"
+drop policy if exists "owners and admins can insert payments" on public.payments;
+create policy "owners and admins can insert payments"
   on public.payments
   for insert
   to authenticated
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.payment_company_matches(company_id, invoice_id)
   );
 
 drop policy if exists "owners admins and managers can update payments" on public.payments;
-create policy "owners admins and managers can update payments"
+drop policy if exists "owners and admins can update payments" on public.payments;
+create policy "owners and admins can update payments"
   on public.payments
   for update
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  using (public.has_company_role(company_id, array['owner', 'admin']))
   with check (
-    public.has_company_role(company_id, array['owner', 'admin', 'manager'])
+    public.has_company_role(company_id, array['owner', 'admin'])
     and public.payment_company_matches(company_id, invoice_id)
   );
 
@@ -1356,19 +1366,21 @@ create policy "owners and admins can delete payments"
   using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can read invoice counters" on public.company_invoice_counters;
-create policy "owners admins and managers can read invoice counters"
+drop policy if exists "owners and admins can read invoice counters" on public.company_invoice_counters;
+create policy "owners and admins can read invoice counters"
   on public.company_invoice_counters
   for select
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']));
 
 drop policy if exists "owners admins and managers can manage invoice counters" on public.company_invoice_counters;
-create policy "owners admins and managers can manage invoice counters"
+drop policy if exists "owners and admins can manage invoice counters" on public.company_invoice_counters;
+create policy "owners and admins can manage invoice counters"
   on public.company_invoice_counters
   for all
   to authenticated
-  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
-  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+  using (public.has_company_role(company_id, array['owner', 'admin']))
+  with check (public.has_company_role(company_id, array['owner', 'admin']));
 
 create table if not exists public.shifts (
   shift_id text primary key default ('shift_' || replace(gen_random_uuid()::text, '-', '')),
@@ -1621,8 +1633,8 @@ declare
   created_invoice_ids text[] := array[]::text[];
   billed_visit_ids text[] := array[]::text[];
 begin
-  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
-    raise exception 'Active owner, admin, or manager membership is required for billing.';
+  if not public.has_company_role(target_company_id, array['owner', 'admin']) then
+    raise exception 'Active owner or admin membership is required for billing.';
   end if;
 
   if target_company_id is null or btrim(target_company_id) = '' then
@@ -1958,8 +1970,8 @@ declare
   next_status text;
   previous_status text;
 begin
-  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
-    raise exception 'Active owner, admin, or manager membership is required for payment recording.';
+  if not public.has_company_role(target_company_id, array['owner', 'admin']) then
+    raise exception 'Active owner or admin membership is required for payment recording.';
   end if;
 
   if target_company_id is null or btrim(target_company_id) = '' then
@@ -1991,7 +2003,10 @@ begin
 
   if found then
     if existing_payment.invoice_id <> target_invoice_id
-      or round(existing_payment.amount, 2) <> target_amount then
+      or round(existing_payment.amount, 2) <> target_amount
+      or existing_payment.payment_date <> target_payment_date
+      or coalesce(existing_payment.method, 'other') <> target_method
+      or coalesce(existing_payment.notes, '') <> coalesce(target_notes, '') then
       raise exception 'Payment idempotency key was already used for a different payment.';
     end if;
 
@@ -2161,8 +2176,8 @@ declare
   next_status text;
   normalized_delivery_status text;
 begin
-  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
-    raise exception 'Active owner, admin, or manager membership is required for invoice delivery.';
+  if not public.has_company_role(target_company_id, array['owner', 'admin']) then
+    raise exception 'Active owner or admin membership is required for invoice delivery.';
   end if;
 
   if target_company_id is null or btrim(target_company_id) = '' then
@@ -2284,8 +2299,8 @@ as $$
 declare
   invoice_record public.invoices%rowtype;
 begin
-  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
-    raise exception 'Active owner, admin, or manager membership is required for invoice export.';
+  if not public.has_company_role(target_company_id, array['owner', 'admin']) then
+    raise exception 'Active owner or admin membership is required for invoice export.';
   end if;
 
   select *

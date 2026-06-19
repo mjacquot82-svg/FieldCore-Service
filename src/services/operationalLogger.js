@@ -15,6 +15,33 @@ const CATEGORIES = new Set([
   'startup',
   'synchronization'
 ]);
+const SENSITIVE_KEY_PATTERNS = [
+  'password',
+  'token',
+  'key',
+  'pin',
+  'email',
+  'name',
+  'phone',
+  'address',
+  'customer',
+  'property',
+  'invoice_id',
+  'invoiceid',
+  'invoice_number',
+  'invoicenumber',
+  'payment_id',
+  'paymentid',
+  'sent_to',
+  'sentto',
+  'amount',
+  'total',
+  'subtotal',
+  'tax',
+  'balance',
+  'paid',
+  'price'
+];
 
 function storageAvailable() {
   return typeof localStorage !== 'undefined';
@@ -39,7 +66,7 @@ function safeValue(value) {
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: value.message,
+      message: isProductionMode() ? 'Technical details redacted in production diagnostics.' : value.message,
       stack: isProductionMode() ? undefined : value.stack
     };
   }
@@ -49,7 +76,7 @@ function safeValue(value) {
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => {
       const lowerKey = key.toLowerCase();
-      if (lowerKey.includes('password') || lowerKey.includes('token') || lowerKey.includes('key') || lowerKey.includes('pin')) {
+      if (SENSITIVE_KEY_PATTERNS.some((pattern) => lowerKey.includes(pattern))) {
         return [key, '[redacted]'];
       }
       return [key, safeValue(item)];

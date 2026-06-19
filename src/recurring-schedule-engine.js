@@ -2,6 +2,7 @@ import {
   createRecurringGeneratedVisits,
   saveRecurringSchedule
 } from './services/scheduleService.js';
+import { isProductionMode } from './data/appMode.js';
 import { escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
@@ -31,6 +32,7 @@ const CANADA_HOLIDAYS = {
 };
 
 function loadState() {
+  if (isProductionMode()) return null;
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY));
   } catch {
