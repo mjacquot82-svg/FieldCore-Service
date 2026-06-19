@@ -9,7 +9,8 @@ import {
   getSession,
   clearSession,
   clearAuthenticatedSession,
-  renderLogin
+  renderLogin,
+  restoreProductionAppSession
 } from './role-pin-login.js';
 import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
 import { renderEmployees, bindEmployeeEvents } from './employees.js';
@@ -960,6 +961,10 @@ async function initializeApp() {
       productionModeBlockedReason = '';
       await renderLogin();
       return;
+    }
+
+    if (!getSession()) {
+      await restoreProductionAppSession(diagnostics);
     }
   }
 

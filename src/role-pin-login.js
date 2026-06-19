@@ -47,6 +47,37 @@ export function setSession(session) {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
+function appRoleForMembershipRole(role) {
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  if (normalizedRole === 'employee') return 'worker';
+  if (normalizedRole === 'manager') return 'manager';
+  return 'admin';
+}
+
+function canRestoreProductionAppSession(diagnostics) {
+  if (!isProductionMode() || !diagnostics?.ready) return false;
+  return ['owner', 'admin', 'manager'].includes(diagnostics.role);
+}
+
+export async function restoreProductionAppSession(diagnostics = null) {
+  const authDiagnostics = diagnostics || (isProductionMode() ? await validateRepositoryAuthContext() : null);
+  if (!canRestoreProductionAppSession(authDiagnostics)) return null;
+
+  const user = await getAuthenticatedUser();
+  const session = {
+    role: appRoleForMembershipRole(authDiagnostics.role),
+    name: user?.email || 'Owner/Admin',
+    started_at: new Date().toISOString(),
+    auth_user_id: authDiagnostics.userId || user?.id || null,
+    membership_id: authDiagnostics.membershipId || null,
+    membership_role: authDiagnostics.role || null,
+    company_id: authDiagnostics.companyId || null,
+    employee_id: authDiagnostics.employeeId || null
+  };
+  setSession(session);
+  return session;
+}
+
 export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
@@ -205,6 +236,11 @@ async function loginCard() {
     const user = await getAuthenticatedUser();
     if (!diagnostics.membershipActive && diagnostics.userId) return productionCreateCompanyCard(diagnostics, user);
     if (!diagnostics.ready) return productionMembershipBlockedCard(diagnostics);
+    const restoredSession = await restoreProductionAppSession(diagnostics);
+    if (restoredSession) {
+      window.location.reload();
+      return '';
+    }
   }
 
   const state = loadState();
@@ -324,7 +360,9 @@ export function bindLoginEvents() {
           taxRate: formData.get('tax_rate'),
           payrollWeekStart: formData.get('payroll_week_start')
         });
-        clearSession();
+        const diagnostics = await validateRepositoryAuthContext();
+        const restoredSession = await restoreProductionAppSession(diagnostics);
+        if (!restoredSession) throw new Error('Company access could not be restored after onboarding.');
         window.location.reload();
       } catch (error) {
         logOperationalError(

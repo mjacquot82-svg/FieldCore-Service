@@ -9,6 +9,7 @@ console.info = () => {};
 const APP_MODE_STORAGE_KEY = 'fieldcore_app_mode_v1';
 const AUTH_SESSION_KEY = 'fieldcore_supabase_auth_session_v1';
 const CONFIG_STORAGE_KEY = 'fieldcore_supabase_config_v1';
+const SESSION_KEY = 'fieldcore_current_session_v1';
 const STATE_KEY = 'servicebatch_invoice_mvp_v1';
 const LOG_STORAGE_KEY = 'fieldcore_operational_logs_v1';
 
@@ -301,6 +302,7 @@ test('production onboarding creates company owner membership and settings', asyn
   const { createProductionOwnerCompany } = await import('../src/services/companyOnboardingService.js');
   const { validateRepositoryAuthContext } = await import('../src/data/repositoryContext.js');
   const { verifyAdminPin } = await import('../src/services/pinVerificationService.js');
+  const { restoreProductionAppSession } = await import('../src/role-pin-login.js');
 
   const result = await createProductionOwnerCompany({
     companyName: 'New Owner Lawn Care',
@@ -326,11 +328,41 @@ test('production onboarding creates company owner membership and settings', asyn
   assert.equal(state.company.company_id, result.company.company_id);
   assert.equal(state.company_memberships[0].membership_id, result.membership.membership_id);
   assert.equal(state.settings.company_id, result.company.company_id);
-  assert.equal((await validateRepositoryAuthContext()).ready, true);
+  const diagnostics = await validateRepositoryAuthContext();
+  assert.equal(diagnostics.ready, true);
+  const restoredSession = await restoreProductionAppSession(diagnostics);
+  const storedSession = JSON.parse(sessionStorage.getItem(SESSION_KEY));
+  assert.equal(restoredSession.membership_role, 'owner');
+  assert.equal(restoredSession.company_id, result.company.company_id);
+  assert.equal(storedSession.membership_id, result.membership.membership_id);
   assert.equal(await verifyAdminPin('2468'), true);
   assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/companies')));
   assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/company_memberships')));
   assert.ok(requests.some((request) => request.method === 'POST' && request.url.includes('/rest/v1/company_settings')));
+});
+
+test('production employee membership still requires employee PIN app session', async () => {
+  configureProduction({
+    user: { id: 'user_employee', email: 'employee@example.test' },
+    membership: {
+      membership_id: 'mbr_employee',
+      company_id: 'co_test',
+      user_id: 'user_employee',
+      employee_id: 'emp_worker',
+      role: 'employee',
+      status: 'active'
+    }
+  });
+  const { validateRepositoryAuthContext } = await import('../src/data/repositoryContext.js');
+  const { restoreProductionAppSession } = await import('../src/role-pin-login.js');
+
+  const diagnostics = await validateRepositoryAuthContext();
+  const restoredSession = await restoreProductionAppSession(diagnostics);
+
+  assert.equal(diagnostics.ready, true);
+  assert.equal(diagnostics.role, 'employee');
+  assert.equal(restoredSession, null);
+  assert.equal(sessionStorage.getItem(SESSION_KEY), null);
 });
 
 test('role permission matrix protects financial and admin workflows', async () => {
