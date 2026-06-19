@@ -3,6 +3,7 @@ import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult }
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseRpc, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
+import { logOperationalEvent } from '../../services/operationalLogger.js';
 
 const INVOICE_FIELDS = [
   'invoice_id',
@@ -19,6 +20,9 @@ const INVOICE_FIELDS = [
   'total',
   'payment_status',
   'amount_paid',
+  'sent_at',
+  'sent_to',
+  'delivery_status',
   'customer_name',
   'created_at',
   'updated_at'
@@ -77,7 +81,8 @@ function normalizeInvoiceFromSupabase(invoice, lineItemsByInvoice = {}) {
     subtotal: Number(invoice.subtotal ?? 0),
     tax: Number(invoice.tax ?? 0),
     total: Number(invoice.total ?? 0),
-    amount_paid: Number(invoice.amount_paid ?? 0)
+    amount_paid: Number(invoice.amount_paid ?? 0),
+    delivery_status: invoice.delivery_status || 'not_sent'
   };
 }
 
@@ -101,7 +106,10 @@ function normalizeInvoiceForSupabase(invoice) {
     tax: Number(invoice.tax ?? 0),
     total: Number(invoice.total ?? 0),
     payment_status: invoice.payment_status || 'draft',
-    amount_paid: Number(invoice.amount_paid ?? 0)
+    amount_paid: Number(invoice.amount_paid ?? 0),
+    sent_at: invoice.sent_at || null,
+    sent_to: invoice.sent_to || null,
+    delivery_status: invoice.delivery_status || 'not_sent'
   });
 }
 
@@ -441,4 +449,158 @@ export async function updateInvoicePaymentFields(invoiceId, patch = {}, metadata
   });
 
   return clone(persistedInvoice);
+}
+
+export async function markInvoiceSent(invoiceId, sentTo, metadata = {}) {
+  const state = readState();
+  const companyId = await resolveRepositoryCompanyId();
+  const normalizedSentTo = String(sentTo || '').trim();
+  if (!normalizedSentTo) throw new Error('Invoice recipient is required.');
+
+  if (isProductionMode()) {
+    const response = await supabaseRpc('mark_invoice_sent', {
+      target_company_id: companyId,
+      target_invoice_id: invoiceId,
+      target_sent_to: normalizedSentTo,
+      target_delivery_status: metadata.deliveryStatus || 'sent'
+    });
+    const result = requireRemoteResult(
+      response.configured && !response.error ? response.data : null,
+      response.error?.message || 'Production invoice send failed.'
+    );
+    const invoice = normalizeInvoiceFromSupabase(result?.invoice);
+    const invoices = requireRemoteResult(
+      await readSupabaseInvoices(companyId),
+      'Production invoice read failed after send.'
+    ) || [];
+
+    writeLocalInvoices(invoices, {
+      ...metadata,
+      action: metadata.action || 'invoice:mark-sent-rpc',
+      invoice_id: invoiceId
+    });
+
+    emit('invoices:changed', {
+      action: metadata.eventAction || metadata.action || 'mark-sent-rpc',
+      invoice_id: invoiceId,
+      invoice: clone(invoice),
+      metadata: clone(metadata)
+    });
+
+    logOperationalEvent({
+      category: 'billing',
+      severity: 'info',
+      action: 'invoice-marked-sent',
+      message: 'Invoice marked sent.',
+      details: { invoiceId, sentTo: normalizedSentTo, deliveryStatus: metadata.deliveryStatus || 'sent' }
+    });
+
+    return clone(invoice);
+  }
+
+  const sentAt = new Date().toISOString();
+  let updatedInvoice = null;
+  const invoices = (state.invoices || []).map((invoice) => {
+    if (invoice.invoice_id !== invoiceId) return invoice;
+    updatedInvoice = {
+      ...invoice,
+      sent_at: invoice.sent_at || sentAt,
+      sent_to: normalizedSentTo,
+      delivery_status: metadata.deliveryStatus || 'sent',
+      payment_status: ['draft', 'open'].includes(invoice.payment_status || 'draft') ? 'sent' : invoice.payment_status,
+      updated_at: sentAt
+    };
+    return updatedInvoice;
+  });
+
+  if (!updatedInvoice) return null;
+
+  writeLocalInvoices(invoices, {
+    ...metadata,
+    action: metadata.action || 'invoice:mark-sent',
+    invoice_id: invoiceId
+  });
+
+  emit('invoices:changed', {
+    action: metadata.eventAction || metadata.action || 'mark-sent',
+    invoice_id: invoiceId,
+    invoice: clone(updatedInvoice),
+    metadata: clone(metadata)
+  });
+
+  logOperationalEvent({
+    category: 'billing',
+    severity: 'info',
+    action: 'invoice-marked-sent',
+    message: 'Invoice marked sent.',
+    details: { invoiceId, sentTo: normalizedSentTo, deliveryStatus: updatedInvoice.delivery_status }
+  });
+
+  return clone(updatedInvoice);
+}
+
+export async function recordInvoiceExport(invoiceId, metadata = {}) {
+  const companyId = await resolveRepositoryCompanyId();
+  const state = readState();
+  let invoice = getInvoice(invoiceId);
+
+  if (isProductionMode()) {
+    const response = await supabaseRpc('record_invoice_export', {
+      target_company_id: companyId,
+      target_invoice_id: invoiceId,
+      export_format: metadata.format || 'print'
+    });
+    requireRemoteResult(
+      response.configured && !response.error ? response.data : null,
+      response.error?.message || 'Production invoice export audit failed.'
+    );
+    const invoices = requireRemoteResult(
+      await readSupabaseInvoices(companyId),
+      'Production invoice read failed after export.'
+    ) || [];
+    invoice = invoices.find((item) => item.invoice_id === invoiceId) || invoice;
+    writeLocalInvoices(invoices, {
+      ...metadata,
+      action: metadata.action || 'invoice:record-export-rpc',
+      invoice_id: invoiceId
+    });
+  } else if (invoice) {
+    const exportedAt = new Date().toISOString();
+    const invoices = (state.invoices || []).map((item) => (
+      item.invoice_id === invoiceId
+        ? {
+            ...item,
+            delivery_status: item.delivery_status === 'not_sent' || !item.delivery_status ? 'exported' : item.delivery_status,
+            updated_at: exportedAt
+          }
+        : item
+    ));
+    invoice = invoices.find((item) => item.invoice_id === invoiceId) || invoice;
+    writeLocalInvoices(invoices, {
+      ...metadata,
+      action: metadata.action || 'invoice:record-export',
+      invoice_id: invoiceId
+    });
+  }
+
+  logOperationalEvent({
+    category: 'billing',
+    severity: 'info',
+    action: 'invoice-exported',
+    message: 'Invoice exported for manual delivery.',
+    details: {
+      invoiceId,
+      invoiceNumber: invoice?.invoice_number || null,
+      format: metadata.format || 'print'
+    }
+  });
+
+  emit('invoices:changed', {
+    action: metadata.eventAction || metadata.action || 'exported',
+    invoice_id: invoiceId,
+    invoice: cloneOrNull(invoice),
+    metadata: clone(metadata)
+  });
+
+  return cloneOrNull(invoice);
 }

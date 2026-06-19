@@ -1,5 +1,10 @@
 import { listCustomers } from './data/repositories/customerRepository.js';
-import { listInvoices, listOpenInvoices } from './data/repositories/invoiceRepository.js';
+import {
+  listInvoices,
+  listOpenInvoices,
+  markInvoiceSent,
+  recordInvoiceExport
+} from './data/repositories/invoiceRepository.js';
 import { listPayments } from './data/repositories/paymentRepository.js';
 import { listProperties, listVisits } from './data/repositories/visitReadRepository.js';
 import { getSession } from './role-pin-login.js';
@@ -128,6 +133,70 @@ function renderServiceDetails(invoice, visits, propertyMap) {
   `;
 }
 
+function renderPrintableInvoice(invoice, customerMap, propertyMap, visits, paymentTotals = {}) {
+  const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
+  const invoiceVisits = getInvoiceVisits(invoice, visits);
+  const balance = getBalance(invoice, paymentTotals);
+  const paidAmount = getPaidAmount(invoice, paymentTotals);
+  const groups = Object.values(groupVisitsByProperty(invoiceVisits, propertyMap));
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <title>${escapeHtml(invoice.invoice_number || 'Invoice')}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111827; margin: 40px; }
+          header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #111827; padding-bottom: 16px; }
+          h1, h2, h3 { margin: 0 0 8px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+          th, td { border-bottom: 1px solid #d1d5db; padding: 10px; text-align: left; }
+          th:last-child, td:last-child { text-align: right; }
+          .totals { margin-top: 24px; margin-left: auto; width: 280px; }
+          .totals div { display: flex; justify-content: space-between; padding: 6px 0; }
+          .balance { font-size: 1.2rem; font-weight: 700; border-top: 2px solid #111827; }
+          @media print { button { display: none; } body { margin: 24px; } }
+        </style>
+      </head>
+      <body>
+        <button onclick="window.print()">Print / Save PDF</button>
+        <header>
+          <div>
+            <h1>Invoice</h1>
+            <p>${escapeHtml(invoice.invoice_number || 'Invoice')}</p>
+          </div>
+          <div>
+            <h2>${escapeHtml(customerName)}</h2>
+            <p>Invoice date: ${escapeHtml(invoice.invoice_date || 'n/a')}</p>
+            <p>Due: ${escapeHtml(invoice.due_date || 'n/a')}</p>
+            <p>Status: ${escapeHtml(invoice.payment_status || 'draft')}</p>
+          </div>
+        </header>
+        <table>
+          <thead><tr><th>Date</th><th>Service</th><th>Location</th><th>Amount</th></tr></thead>
+          <tbody>
+            ${groups.flatMap((group) => group.visits.map((visit) => `
+              <tr>
+                <td>${escapeHtml(visit.visit_date || 'No date')}</td>
+                <td>${escapeHtml(visit.service_description || group.serviceType || 'Service')}</td>
+                <td>${escapeHtml(group.address)}</td>
+                <td>${currency(visit.price)}</td>
+              </tr>
+            `)).join('') || `<tr><td colspan="4">No linked service lines found.</td></tr>`}
+          </tbody>
+        </table>
+        <section class="totals">
+          <div><span>Subtotal</span><strong>${currency(invoice.subtotal)}</strong></div>
+          <div><span>Tax</span><strong>${currency(invoice.tax)}</strong></div>
+          <div><span>Total</span><strong>${currency(invoice.total)}</strong></div>
+          <div><span>Paid</span><strong>${currency(paidAmount)}</strong></div>
+          <div class="balance"><span>Balance Due</span><strong>${currency(balance)}</strong></div>
+        </section>
+      </body>
+    </html>
+  `;
+}
+
 function renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId, paymentTotals = {}) {
   const customerName = customerMap[invoice.customer_id]?.name || invoice.customer_name || 'Unknown customer';
   const balance = getBalance(invoice, paymentTotals);
@@ -193,15 +262,18 @@ function renderInvoicePreview(invoice, customerMap, propertyMap, visits, payment
         <div><span>Paid</span><strong>${currency(paidAmount)}</strong></div>
         <div><span>Invoice Date</span><strong>${escapeHtml(invoice.invoice_date || invoice.created_at?.slice(0, 10) || 'n/a')}</strong></div>
         <div><span>Due</span><strong>${escapeHtml(invoice.due_date || 'n/a')}</strong></div>
+        <div><span>Sent</span><strong>${escapeHtml(invoice.sent_at ? invoice.sent_at.slice(0, 10) : 'not sent')}</strong></div>
+        <div><span>Delivery</span><strong>${escapeHtml(invoice.delivery_status || 'not_sent')}</strong></div>
       </div>
 
       ${renderServiceDetails(invoice, invoiceVisits, propertyMap)}
 
       <div class="actions invoice-actions invoice-preview-actions">
         ${permissions?.financials?.recordPayments ? '<button type="button" data-invoice-payment>Record payment</button>' : ''}
-        ${permissions?.financials?.exportInvoices ? '<button type="button" data-invoice-print>Print / Save PDF</button>' : ''}
+        ${permissions?.financials?.exportInvoices ? '<button type="button" data-invoice-export>Export / Print</button>' : ''}
+        ${permissions?.financials?.exportInvoices ? '<button type="button" data-invoice-mark-sent>Mark Sent</button>' : ''}
       </div>
-      <p class="invoice-next-action"><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
+      <p class="invoice-next-action"><strong>Manual delivery:</strong> export the invoice, send it outside FieldCore, then mark it sent.</p>
     </aside>
   `;
 }
@@ -303,12 +375,48 @@ function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visit
     });
   });
 
-  section.querySelectorAll('[data-invoice-print]').forEach((button) => {
+  section.querySelectorAll('[data-invoice-export]').forEach((button) => {
     if (button.dataset.bound === 'true') return;
     button.dataset.bound = 'true';
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       if (!permissions?.financials?.exportInvoices) return;
-      window.print();
+      const selectedInvoiceId = section.querySelector('[data-selected-invoice]')?.dataset.selectedInvoice;
+      const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
+      if (!selectedInvoice) return;
+      await recordInvoiceExport(selectedInvoice.invoice_id, { format: 'print', source: 'invoice-workspace' });
+      section.dataset.invoiceWorkspace = 'false';
+      const popup = window.open('', '_blank');
+      if (!popup) {
+        window.print();
+        scheduleEnhanceInvoicesView();
+        return;
+      }
+      popup.document.write(renderPrintableInvoice(selectedInvoice, customerMap, propertyMap, visits, paymentTotals));
+      popup.document.close();
+      popup.focus();
+      popup.print();
+      scheduleEnhanceInvoicesView();
+    });
+  });
+
+  section.querySelectorAll('[data-invoice-mark-sent]').forEach((button) => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
+    button.addEventListener('click', async () => {
+      if (!permissions?.financials?.exportInvoices) return;
+      const selectedInvoiceId = section.querySelector('[data-selected-invoice]')?.dataset.selectedInvoice;
+      const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
+      if (!selectedInvoice) return;
+      const customer = customerMap[selectedInvoice.customer_id];
+      const defaultRecipient = selectedInvoice.sent_to || customer?.email || '';
+      const sentTo = window.prompt('Sent to email or contact:', defaultRecipient);
+      if (sentTo === null) return;
+      await markInvoiceSent(selectedInvoice.invoice_id, sentTo, {
+        source: 'invoice-workspace',
+        deliveryStatus: 'sent'
+      });
+      section.dataset.invoiceWorkspace = 'false';
+      scheduleEnhanceInvoicesView();
     });
   });
 }

@@ -1134,6 +1134,9 @@ create table if not exists public.invoices (
   total numeric(12, 2) not null default 0,
   payment_status text not null default 'draft',
   amount_paid numeric(12, 2) not null default 0,
+  sent_at timestamptz,
+  sent_to text,
+  delivery_status text not null default 'not_sent',
   customer_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -1154,6 +1157,31 @@ alter table public.invoices
 
 alter table public.invoices
   add column if not exists idempotency_key text;
+
+alter table public.invoices
+  add column if not exists sent_at timestamptz;
+
+alter table public.invoices
+  add column if not exists sent_to text;
+
+alter table public.invoices
+  add column if not exists delivery_status text not null default 'not_sent';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'invoices_delivery_status_check'
+      and conrelid = 'public.invoices'::regclass
+  ) then
+    alter table public.invoices
+      add constraint invoices_delivery_status_check check (
+        delivery_status in ('not_sent', 'exported', 'sent', 'failed')
+      );
+  end if;
+end;
+$$;
 
 do $$
 begin
@@ -2115,6 +2143,199 @@ $$;
 
 comment on function public.record_invoice_payment(text, text, numeric, date, text, text, text, boolean)
   is 'Atomically records an idempotent invoice payment, prevents overpayment by default, updates durable invoice amount/status, and writes audit events.';
+
+create or replace function public.mark_invoice_sent(
+  target_company_id text,
+  target_invoice_id text,
+  target_sent_to text,
+  target_delivery_status text default 'sent'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  invoice_record public.invoices%rowtype;
+  previous_status text;
+  next_status text;
+  normalized_delivery_status text;
+begin
+  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
+    raise exception 'Active owner, admin, or manager membership is required for invoice delivery.';
+  end if;
+
+  if target_company_id is null or btrim(target_company_id) = '' then
+    raise exception 'company_id is required.';
+  end if;
+
+  if target_invoice_id is null or btrim(target_invoice_id) = '' then
+    raise exception 'invoice_id is required.';
+  end if;
+
+  target_sent_to := nullif(btrim(coalesce(target_sent_to, '')), '');
+  if target_sent_to is null then
+    raise exception 'sent_to is required.';
+  end if;
+
+  normalized_delivery_status := coalesce(nullif(btrim(target_delivery_status), ''), 'sent');
+  if normalized_delivery_status not in ('exported', 'sent') then
+    raise exception 'delivery_status must be exported or sent.';
+  end if;
+
+  select *
+  into invoice_record
+  from public.invoices
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id
+  for update;
+
+  if not found then
+    raise exception 'Invoice was not found for this company.';
+  end if;
+
+  if invoice_record.payment_status in ('void', 'cancelled') then
+    raise exception 'Void or cancelled invoices cannot be marked sent.';
+  end if;
+
+  previous_status := invoice_record.payment_status;
+  next_status := case
+    when invoice_record.payment_status in ('draft', 'open') then 'sent'
+    else invoice_record.payment_status
+  end;
+
+  update public.invoices
+  set sent_at = coalesce(sent_at, now()),
+      sent_to = target_sent_to,
+      delivery_status = normalized_delivery_status,
+      payment_status = next_status,
+      updated_at = now()
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id
+  returning * into invoice_record;
+
+  insert into public.activity_events (
+    company_id,
+    customer_id,
+    invoice_id,
+    event_type,
+    title,
+    detail,
+    metadata
+  )
+  values (
+    target_company_id,
+    invoice_record.customer_id,
+    invoice_record.invoice_id,
+    'invoice.sent',
+    'Invoice sent',
+    'Invoice ' || invoice_record.invoice_number || ' marked sent to ' || target_sent_to,
+    jsonb_build_object(
+      'sent_to', target_sent_to,
+      'sent_at', invoice_record.sent_at,
+      'delivery_status', invoice_record.delivery_status,
+      'from_status', previous_status,
+      'to_status', invoice_record.payment_status
+    )
+  );
+
+  if previous_status is distinct from invoice_record.payment_status then
+    insert into public.activity_events (
+      company_id,
+      customer_id,
+      invoice_id,
+      event_type,
+      title,
+      detail,
+      metadata
+    )
+    values (
+      target_company_id,
+      invoice_record.customer_id,
+      invoice_record.invoice_id,
+      'invoice.status_changed',
+      'Invoice status changed',
+      'Invoice ' || invoice_record.invoice_number || ' changed from ' || previous_status || ' to ' || invoice_record.payment_status,
+      jsonb_build_object(
+        'from_status', previous_status,
+        'to_status', invoice_record.payment_status,
+        'delivery_status', invoice_record.delivery_status
+      )
+    );
+  end if;
+
+  return jsonb_build_object('invoice', to_jsonb(invoice_record));
+end;
+$$;
+
+comment on function public.mark_invoice_sent(text, text, text, text)
+  is 'Marks an invoice exported/sent, updates delivery fields and status, and writes invoice delivery audit events.';
+
+create or replace function public.record_invoice_export(
+  target_company_id text,
+  target_invoice_id text,
+  export_format text default 'print'
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  invoice_record public.invoices%rowtype;
+begin
+  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
+    raise exception 'Active owner, admin, or manager membership is required for invoice export.';
+  end if;
+
+  select *
+  into invoice_record
+  from public.invoices
+  where company_id = target_company_id
+    and invoice_id = target_invoice_id
+  for update;
+
+  if not found then
+    raise exception 'Invoice was not found for this company.';
+  end if;
+
+  if invoice_record.delivery_status = 'not_sent' then
+    update public.invoices
+    set delivery_status = 'exported',
+        updated_at = now()
+    where company_id = target_company_id
+      and invoice_id = target_invoice_id
+    returning * into invoice_record;
+  end if;
+
+  insert into public.activity_events (
+    company_id,
+    customer_id,
+    invoice_id,
+    event_type,
+    title,
+    detail,
+    metadata
+  )
+  values (
+    target_company_id,
+    invoice_record.customer_id,
+    invoice_record.invoice_id,
+    'invoice.exported',
+    'Invoice exported',
+    'Invoice ' || invoice_record.invoice_number || ' exported for manual delivery',
+    jsonb_build_object(
+      'format', coalesce(nullif(btrim(export_format), ''), 'print'),
+      'delivery_status', invoice_record.delivery_status
+    )
+  );
+
+  return jsonb_build_object('invoice', to_jsonb(invoice_record));
+end;
+$$;
+
+comment on function public.record_invoice_export(text, text, text)
+  is 'Writes an invoice export audit event for manual PDF/print delivery workflows.';
 
 create or replace trigger set_companies_updated_at
   before update on public.companies

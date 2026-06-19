@@ -233,7 +233,7 @@ function renderInvoiceRiskRow(invoice, customers) {
       <td><strong>${escapeHtml(invoice.invoice_number || 'Invoice')}</strong><br><span>${escapeHtml(customerName)}</span></td>
       <td>${escapeHtml(invoice.due_date || 'n/a')}</td>
       <td>${isOverdue ? `${invoice.days_overdue} days` : 'Current'}</td>
-      <td>${escapeHtml(invoice.ar_bucket)}</td>
+      <td>${escapeHtml(invoice.payment_status || invoice.ar_bucket)}<br><span>${escapeHtml(invoice.delivery_status || 'not_sent')}</span></td>
       <td><strong>${currency(invoice.balance)}</strong></td>
     </tr>
   `;
@@ -304,7 +304,7 @@ function renderArDashboard() {
           <section class="panel">
             <h3>Highest-Risk Invoices</h3>
             <table class="ar-risk-table">
-              <thead><tr><th>Invoice</th><th>Due</th><th>Age</th><th>Bucket</th><th>Balance</th></tr></thead>
+              <thead><tr><th>Invoice</th><th>Due</th><th>Age</th><th>Status</th><th>Balance</th></tr></thead>
               <tbody>${openInvoices.slice(0, 8).map((invoice) => renderInvoiceRiskRow(invoice, customers)).join('') || '<tr><td colspan="5">No open invoices.</td></tr>'}</tbody>
             </table>
           </section>
