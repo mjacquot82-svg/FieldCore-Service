@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { getAuthenticatedUser } from '../supabaseAuth.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -63,6 +63,7 @@ function normalizeMembershipForSupabase(membership) {
 }
 
 async function ensureSupabaseCompany(state) {
+  if (isProductionMode()) return true;
   const company = state.company;
   if (!company?.company_id) return false;
 
@@ -250,6 +251,10 @@ export async function getCompanyMembershipForUser(userId, companyId = null) {
 }
 
 export async function ensureDefaultOwnerMembership(metadata = {}) {
+  if (isProductionMode()) {
+    throw new Error('Production owner membership setup requires an existing Supabase company_memberships row.');
+  }
+
   const state = readState();
   const existingOwner = localMemberships().find((membership) =>
     membership.company_id === state.company?.company_id &&
@@ -290,6 +295,9 @@ export async function attachOwnerMembershipToUser(userId, metadata = {}) {
 
   const existingUserMembership = await getCompanyMembershipForUser(userId, companyId);
   if (existingUserMembership) return existingUserMembership;
+  if (isProductionMode()) {
+    throw new Error('Production owner membership linking requires an existing Supabase company_memberships row.');
+  }
 
   const ownerMembership = localMemberships().find((membership) =>
     membership.company_id === companyId &&

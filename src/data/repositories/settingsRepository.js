@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
@@ -47,6 +47,7 @@ function writeLocalSettings(settings, metadata = {}) {
 }
 
 async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
+  if (isProductionMode()) return true;
   const company = state.company;
   if (!companyId) return false;
 
@@ -188,10 +189,14 @@ export function getAdminPin() {
 
 export async function ensureDefaultAdminPin() {
   const state = readState();
-  if (state.settings?.admin_pin || state.settings?.admin_pin_hash) return clone(state.settings);
+  const remoteSettings = isProductionMode()
+    ? await readSupabaseSettings(await resolveRepositoryCompanyId())
+    : null;
+  const currentSettings = requireRemoteResult(remoteSettings, 'Production settings read failed.') || state.settings;
+  if (currentSettings?.admin_pin || currentSettings?.admin_pin_hash) return clone(currentSettings);
 
   const settings = {
-    ...(state.settings || {}),
+    ...(currentSettings || {}),
     admin_pin: null,
     admin_pin_hash: await hashPin(DEFAULT_ADMIN_PIN)
   };
@@ -214,8 +219,12 @@ export async function ensureDefaultAdminPin() {
 
 export async function updateAdminPin(pin, metadata = {}) {
   const state = readState();
+  const remoteSettings = isProductionMode()
+    ? await readSupabaseSettings(await resolveRepositoryCompanyId())
+    : null;
+  const currentSettings = requireRemoteResult(remoteSettings, 'Production settings read failed.') || state.settings;
   const settings = {
-    ...(state.settings || {}),
+    ...(currentSettings || {}),
     admin_pin: null,
     admin_pin_hash: await hashPin(pin)
   };
@@ -239,8 +248,12 @@ export async function updateAdminPin(pin, metadata = {}) {
 
 export async function updatePayrollWeekStart(payrollWeekStart) {
   const state = readState();
+  const remoteSettings = isProductionMode()
+    ? await readSupabaseSettings(await resolveRepositoryCompanyId())
+    : null;
+  const currentSettings = requireRemoteResult(remoteSettings, 'Production settings read failed.') || state.settings;
   const settings = {
-    ...(state.settings || {}),
+    ...(currentSettings || {}),
     payroll_week_start: payrollWeekStart
   };
 

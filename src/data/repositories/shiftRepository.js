@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -72,7 +72,7 @@ async function readSupabaseShifts(companyId) {
 
 async function readSupabaseActiveShift(employeeId) {
   const companyId = await resolveRepositoryCompanyId();
-  if (!companyId || !employeeId) return null;
+  if (!companyId || !employeeId) return undefined;
 
   const response = await supabaseSelect('shifts', {
     select: SHIFT_SELECT_FIELDS,
@@ -82,7 +82,7 @@ async function readSupabaseActiveShift(employeeId) {
     limit: '1'
   });
 
-  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  if (!response.configured || response.error || !Array.isArray(response.data)) return undefined;
   return cloneOrNull(response.data[0]);
 }
 
@@ -154,17 +154,24 @@ export function getActiveShift(employeeId) {
 
 export async function getActiveShiftAsync(employeeId) {
   const shift = await readSupabaseActiveShift(employeeId);
+  if (isProductionMode() && shift === undefined) throw new Error('Production active shift read failed.');
   return shift || getActiveShift(employeeId);
 }
 
 export async function startShift(employeeId, metadata = {}) {
   const state = readState();
-  const shifts = state.shifts || [];
-  const activeShift = shifts.find((shift) => shift.employee_id === employeeId && !shift.ended_at);
+  const sourceShifts = isProductionMode()
+    ? await readSupabaseShifts(await resolveRepositoryCompanyId())
+    : (state.shifts || []);
+  const shifts = requireRemoteResult(sourceShifts, 'Production shift read failed.') || [];
+  const remoteActiveShift = await readSupabaseActiveShift(employeeId);
+  if (isProductionMode() && remoteActiveShift === undefined) throw new Error('Production active shift read failed.');
+  const activeShift = isProductionMode()
+    ? remoteActiveShift
+    : shifts.find((shift) => shift.employee_id === employeeId && !shift.ended_at);
 
   if (activeShift) return clone(activeShift);
 
-  const remoteActiveShift = await readSupabaseActiveShift(employeeId);
   if (remoteActiveShift) {
     writeLocalShifts([...shifts, remoteActiveShift], {
       action: 'shift:sync-active',
@@ -205,7 +212,12 @@ export async function startShift(employeeId, metadata = {}) {
 
 export async function endShift(employeeId, metadata = {}) {
   const state = readState();
-  const shifts = state.shifts || [];
+  const remoteActiveShift = isProductionMode() ? await readSupabaseActiveShift(employeeId) : null;
+  if (isProductionMode() && remoteActiveShift === undefined) throw new Error('Production active shift read failed.');
+  const sourceShifts = isProductionMode()
+    ? await readSupabaseShifts(await resolveRepositoryCompanyId())
+    : (state.shifts || []);
+  const shifts = requireRemoteResult(sourceShifts, 'Production shift read failed.') || [];
   let endedShift = null;
 
   const nextShifts = shifts.map((shift) => {

@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -326,9 +326,12 @@ export async function createInvoices(invoices, metadata = {}) {
 
 export async function updateInvoicePaymentFields(invoiceId, patch = {}, metadata = {}) {
   const state = readState();
+  const sourceInvoices = isProductionMode()
+    ? await readSupabaseInvoices(await resolveRepositoryCompanyId())
+    : (state.invoices || []);
   let updatedInvoice = null;
 
-  const invoices = state.invoices || [];
+  const invoices = requireRemoteResult(sourceInvoices, 'Production invoice read failed.') || [];
   const nextInvoices = invoices.map((invoice) => {
     if (invoice.invoice_id !== invoiceId) return invoice;
     updatedInvoice = {

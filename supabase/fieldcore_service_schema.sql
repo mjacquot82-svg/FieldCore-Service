@@ -943,16 +943,8 @@ as $$
     from public.routes r
     where r.company_id = target_company_id
       and r.route_id = target_route_id
-      and (
-        (
-          public.current_employee_id(target_company_id) is not null
-          and r.employee_id = public.current_employee_id(target_company_id)
-        )
-        or (
-          public.current_employee_name(target_company_id) is not null
-          and r.assigned_worker = public.current_employee_name(target_company_id)
-        )
-      )
+      and public.current_employee_id(target_company_id) is not null
+      and r.employee_id = public.current_employee_id(target_company_id)
   )
 $$;
 
@@ -968,42 +960,24 @@ as $$
     from public.visits v
     where v.company_id = target_company_id
       and v.visit_id = target_visit_id
-      and (
-        (
-          public.current_employee_name(target_company_id) is not null
-          and public.current_employee_name(target_company_id) in (
-            v.assigned_worker,
-            v.worker_name,
-            v.crew_name
+      and exists (
+        select 1
+        from public.routes r
+        where r.company_id = v.company_id
+          and public.current_employee_id(target_company_id) is not null
+          and r.employee_id = public.current_employee_id(target_company_id)
+          and (
+            r.route_id = v.route_id
+            or r.visit_ids ? v.visit_id
           )
-        )
-        or exists (
-          select 1
-          from public.routes r
-          where r.company_id = v.company_id
-            and (
-              (
-                public.current_employee_id(target_company_id) is not null
-                and r.employee_id = public.current_employee_id(target_company_id)
-              )
-              or (
-                public.current_employee_name(target_company_id) is not null
-                and r.assigned_worker = public.current_employee_name(target_company_id)
-              )
-            )
-            and (
-              r.route_id = v.route_id
-              or r.visit_ids ? v.visit_id
-            )
-        )
       )
   )
 $$;
 
 comment on function public.is_assigned_route(text, text)
-  is 'Returns true when auth.uid() is assigned to a route through employee_id or the current assigned_worker text workflow.';
+  is 'Returns true when auth.uid() is assigned to a route through company_memberships.employee_id and routes.employee_id.';
 comment on function public.is_assigned_visit(text, text)
-  is 'Returns true when auth.uid() is assigned to a visit directly by worker text or through an assigned route.';
+  is 'Returns true when auth.uid() is assigned to a visit through a route linked by employee_id.';
 
 create or replace function public.enforce_employee_visit_lifecycle_update()
 returns trigger

@@ -2,7 +2,7 @@ import { readState } from '../data/storage/local-state-adapter.js';
 import {
   addStopsToRoute,
   createRoute,
-  listRoutes,
+  listRoutesAsync,
   moveStopToRoute as moveStopToRouteRecord,
   removeStopFromRoute,
   reorderRouteStops as reorderRouteStopsRecord
@@ -17,12 +17,16 @@ function findMatchingRoute(routes, routeInput) {
     route.route_date === routeInput.route_date &&
     route.route_day === routeInput.route_day &&
     route.name === routeInput.name &&
-    (route.assigned_worker || '') === (routeInput.assigned_worker || '')
+    (
+      routeInput.employee_id
+        ? route.employee_id === routeInput.employee_id
+        : (route.assigned_worker || '') === (routeInput.assigned_worker || '')
+    )
   );
 }
 
 async function removeVisitFromAllRoutes(visitId) {
-  for (const route of listRoutes()) {
+  for (const route of await listRoutesAsync()) {
     if ((route.visit_ids || []).includes(visitId)) {
       await removeStopFromRoute(route.route_id, visitId, {
         action: 'route:remove-stop-for-move',
@@ -33,7 +37,7 @@ async function removeVisitFromAllRoutes(visitId) {
 }
 
 export async function saveRouteWithStops(routeInput, visitIds = [], metadata = {}) {
-  const existingRoute = findMatchingRoute(listRoutes(), routeInput);
+  const existingRoute = findMatchingRoute(await listRoutesAsync(), routeInput);
   const route = existingRoute
     ? await addStopsToRoute(existingRoute.route_id, visitIds, {
         ...metadata,
@@ -98,7 +102,7 @@ export async function moveStopToRoute(routeId, visitId, metadata = {}) {
   return readState();
 }
 
-export function reorderRouteStops(visitId, direction, metadata = {}) {
-  reorderRouteStopsRecord(visitId, direction, metadata);
+export async function reorderRouteStops(visitId, direction, metadata = {}) {
+  await reorderRouteStopsRecord(visitId, direction, metadata);
   return readState();
 }

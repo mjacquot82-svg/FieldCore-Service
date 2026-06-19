@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
@@ -42,6 +42,7 @@ function writeLocalEmployees(employees, metadata = {}) {
 }
 
 async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
+  if (isProductionMode()) return true;
   const company = state.company;
   if (!companyId) return false;
 
@@ -105,6 +106,21 @@ async function readSupabaseEmployees(companyId) {
 
   if (!response.configured || response.error || !Array.isArray(response.data)) return null;
   return clone(response.data);
+}
+
+async function readSupabaseEmployee(employeeId) {
+  const companyId = await resolveRepositoryCompanyId();
+  if (!companyId || !employeeId) return null;
+
+  const response = await supabaseSelect('employees', {
+    select: EMPLOYEE_SELECT_FIELDS,
+    company_id: `eq.${companyId}`,
+    employee_id: `eq.${employeeId}`,
+    limit: '1'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return cloneOrNull(response.data[0]);
 }
 
 async function writeSupabaseEmployee(employee) {
@@ -237,9 +253,12 @@ export async function createEmployee(employeeInput = {}) {
 
 export async function toggleEmployeeStatus(employeeId) {
   const state = readState();
+  const sourceEmployees = isProductionMode()
+    ? await readSupabaseEmployees(await resolveRepositoryCompanyId())
+    : (state.employees || []);
   let updatedEmployee = null;
 
-  const employees = state.employees || [];
+  const employees = requireRemoteResult(sourceEmployees, 'Production employee read failed.') || [];
   const nextEmployees = employees.map((employee) => {
     if (employee.employee_id !== employeeId) return employee;
     updatedEmployee = {
@@ -275,10 +294,13 @@ export async function toggleEmployeeStatus(employeeId) {
 
 export async function updateEmployeePin(employeeId, pin) {
   const state = readState();
+  const sourceEmployees = isProductionMode()
+    ? await readSupabaseEmployees(await resolveRepositoryCompanyId())
+    : (state.employees || []);
   let updatedEmployee = null;
   const pinHash = await hashPin(pin);
 
-  const employees = state.employees || [];
+  const employees = requireRemoteResult(sourceEmployees, 'Production employee read failed.') || [];
   const nextEmployees = employees.map((employee) => {
     if (employee.employee_id !== employeeId) return employee;
     updatedEmployee = {
@@ -314,7 +336,9 @@ export async function updateEmployeePin(employeeId, pin) {
 
 export async function deleteEmployee(employeeId) {
   const state = readState();
-  const employee = (state.employees || []).find((item) => item.employee_id === employeeId);
+  const employee = isProductionMode()
+    ? await readSupabaseEmployee(employeeId)
+    : (state.employees || []).find((item) => item.employee_id === employeeId);
   if (!employee) return null;
 
   requireRemoteResult(

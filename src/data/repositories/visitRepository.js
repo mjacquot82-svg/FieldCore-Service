@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -280,9 +280,12 @@ export async function bulkCreateVisits(visits = [], metadata = {}) {
 
 export async function updateVisit(visitId, patch = {}, metadata = {}) {
   const state = readState();
+  const sourceVisits = isProductionMode()
+    ? await readSupabaseVisits(await resolveRepositoryCompanyId())
+    : (state.visits || []);
   let updatedVisit = null;
 
-  const visits = state.visits || [];
+  const visits = requireRemoteResult(sourceVisits, 'Production visit read failed.') || [];
   const nextVisits = visits.map((visit) => {
     if (visit.visit_id !== visitId) return visit;
     updatedVisit = {
@@ -349,7 +352,8 @@ export function updateSkipReason(visitId, skipReason, metadata = {}) {
 }
 
 export async function updateCompletionMetadata(visitId, metadata = {}) {
-  const existingVisit = getVisit(visitId);
+  const existingVisit = isProductionMode() ? await readSupabaseVisit(visitId) : getVisit(visitId);
+  requireRemoteResult(existingVisit, 'Production visit read failed.');
   if (!existingVisit) return null;
 
   const completedDate = metadata.completed_date || new Date().toISOString().slice(0, 10);

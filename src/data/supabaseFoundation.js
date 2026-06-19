@@ -5,6 +5,7 @@ import { syncCustomersFromSupabase } from './repositories/customerRepository.js'
 import { syncInvoicesFromSupabase } from './repositories/invoiceRepository.js';
 import { syncPaymentsFromSupabase } from './repositories/paymentRepository.js';
 import { syncPropertiesFromSupabase } from './repositories/propertyRepository.js';
+import { syncRouteStopsFromSupabase } from './repositories/routeStopRepository.js';
 import { syncRoutesFromSupabase } from './repositories/routeRepository.js';
 import { syncSettingsFromSupabase } from './repositories/settingsRepository.js';
 import { syncShiftsFromSupabase } from './repositories/shiftRepository.js';
@@ -34,13 +35,14 @@ export async function syncFoundationFromSupabase() {
   const properties = requireProductionSync(await syncPropertiesFromSupabase(), 'properties');
   const visits = requireProductionSync(await syncVisitsFromSupabase(), 'visits');
   const routes = requireProductionSync(await syncRoutesFromSupabase(), 'routes');
+  const routeStops = requireProductionSync(await syncRouteStopsFromSupabase(), 'route stops');
   const invoices = requireProductionSync(await syncInvoicesFromSupabase(), 'invoices');
   const payments = requireProductionSync(await syncPaymentsFromSupabase(), 'payments');
   const shifts = requireProductionSync(await syncShiftsFromSupabase(), 'shifts');
 
   return {
     configured: true,
-    synced: Boolean(settings || employees || companyMemberships || customers || properties || visits || routes || invoices || payments || shifts),
+    synced: Boolean(settings || employees || companyMemberships || customers || properties || visits || routes || routeStops || invoices || payments || shifts),
     settings: Boolean(settings),
     employees: Boolean(employees),
     companyMemberships: Boolean(companyMemberships),
@@ -49,6 +51,7 @@ export async function syncFoundationFromSupabase() {
     properties: Boolean(properties),
     visits: Boolean(visits),
     routes: Boolean(routes),
+    routeStops: Boolean(routeStops),
     invoices: Boolean(invoices),
     payments: Boolean(payments),
     shifts: Boolean(shifts)

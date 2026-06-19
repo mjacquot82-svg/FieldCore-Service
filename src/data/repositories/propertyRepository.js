@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -212,9 +212,12 @@ export async function createProperty(propertyInput = {}) {
 
 export async function updateProperty(propertyId, patch = {}, metadata = {}) {
   const state = readState();
+  const sourceProperties = isProductionMode()
+    ? await readSupabaseProperties(await resolveRepositoryCompanyId())
+    : (state.properties || []);
   let updatedProperty = null;
 
-  const properties = state.properties || [];
+  const properties = requireRemoteResult(sourceProperties, 'Production property read failed.') || [];
   const nextProperties = properties.map((property) => {
     if (property.property_id !== propertyId) return property;
     updatedProperty = {
@@ -262,9 +265,12 @@ export function deactivateProperty(propertyId, metadata = {}) {
 
 export async function deactivatePropertiesByCustomer(customerId, metadata = {}) {
   const state = readState();
+  const sourceProperties = isProductionMode()
+    ? await readSupabaseProperties(await resolveRepositoryCompanyId())
+    : (state.properties || []);
   const deactivatedProperties = [];
 
-  const nextProperties = (state.properties || []).map((property) => {
+  const nextProperties = (requireRemoteResult(sourceProperties, 'Production property read failed.') || []).map((property) => {
     if (property.customer_id !== customerId) return property;
     const updatedProperty = {
       ...property,

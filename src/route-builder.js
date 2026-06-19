@@ -1,4 +1,5 @@
 import { getCustomerMap, getPropertyMap } from './lib/store.js';
+import { isProductionMode } from './data/appMode.js';
 import {
   moveStopToRoute,
   removeStopFromRoutes,
@@ -41,8 +42,17 @@ function getRouteAssignmentMap(routes = []) {
   }, new Map());
 }
 
-function routeLabel(route) {
-  const worker = route.assigned_worker || 'Unassigned worker';
+function employeeNameById(state) {
+  return new Map((state.employees || []).map((employee) => [employee.employee_id, employee.name]));
+}
+
+function routeWorkerLabel(route, employeesById = new Map()) {
+  const worker = employeesById.get(route.employee_id) || route.assigned_worker || 'Unassigned worker';
+  return worker;
+}
+
+function routeLabel(route, employeesById = new Map()) {
+  const worker = routeWorkerLabel(route, employeesById);
   return `${worker} - ${route.name}`;
 }
 
@@ -54,20 +64,20 @@ function renderRouteDaySelect(selectedDay) {
   return `<select name="route_day" required>${routeDays.map((day) => `<option value="${day}" ${day === selectedDay ? 'selected' : ''}>${day}</option>`).join('')}</select>`;
 }
 
-function renderRouteTargetOptions(savedRoutes, currentRouteId = '') {
+function renderRouteTargetOptions(savedRoutes, currentRouteId = '', employeesById = new Map()) {
   return savedRoutes.map((route) => `
-    <option value="${route.route_id}" ${route.route_id === currentRouteId ? 'selected' : ''}>${routeLabel(route)}</option>
+    <option value="${route.route_id}" ${route.route_id === currentRouteId ? 'selected' : ''}>${routeLabel(route, employeesById)}</option>
   `).join('');
 }
 
-function renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes = []) {
+function renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes = [], employeesById = new Map()) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const assignedRoute = routeAssignment.get(visit.visit_id);
   const isRouted = Boolean(assignedRoute);
   const city = (property?.service_address || '').split(',').slice(-2, -1)[0]?.trim();
-  const workerName = assignedRoute?.assigned_worker || visit.assigned_worker || 'Unassigned worker';
-  const routeOptions = renderRouteTargetOptions(savedRoutes, assignedRoute?.route_id);
+  const workerName = assignedRoute ? routeWorkerLabel(assignedRoute, employeesById) : (visit.assigned_worker || 'Unassigned worker');
+  const routeOptions = renderRouteTargetOptions(savedRoutes, assignedRoute?.route_id, employeesById);
 
   return `
     <article class="route-stop-card ${isRouted ? 'already-routed' : ''}">
@@ -103,6 +113,7 @@ function renderVisitCheckbox(visit, customers, properties, routeAssignment, save
 function renderSavedRoute(route, state) {
   const customers = getCustomerMap(state);
   const properties = getPropertyMap(state);
+  const employeesById = employeeNameById(state);
   const visitsById = new Map((state.visits || []).map((visit) => [visit.visit_id, visit]));
   const routeVisits = (route.visit_ids || []).map((visitId) => visitsById.get(visitId)).filter(Boolean);
   const routeTotal = routeVisits.reduce((sum, visit) => sum + Number(visit.price || 0), 0);
@@ -113,7 +124,7 @@ function renderSavedRoute(route, state) {
       <div class="customer-card-header">
         <div>
           <h3>${routeDay} · ${route.name}</h3>
-          <p>${route.assigned_worker || 'Unassigned'} · preview ${route.route_date} · ${currency(routeTotal)}</p>
+          <p>${routeWorkerLabel(route, employeesById)} · preview ${route.route_date} · ${currency(routeTotal)}</p>
         </div>
         <span class="badge paid-up">${routeVisits.length} stops</span>
       </div>
@@ -136,6 +147,9 @@ export function renderRouteBuilder(state, date = today()) {
   const savedRoutes = (state.routes || []).filter((route) => route.route_date === date);
   const routeAssignment = getRouteAssignmentMap(savedRoutes);
   const metrics = getRouteMetrics(visits, savedRoutes);
+  const productionMode = isProductionMode();
+  const activeEmployees = (state.employees || []).filter((employee) => employee.status === 'active');
+  const employeesById = employeeNameById(state);
 
   return `
     <section class="route-builder-view">
@@ -170,7 +184,13 @@ export function renderRouteBuilder(state, date = today()) {
             ${renderRouteDaySelect(routeDay)}
           </label>
           <label>Assign Worker
-            <input name="assigned_worker" placeholder="Worker name" />
+            ${productionMode
+              ? `<select name="employee_id" required>
+                  <option value="">Select employee</option>
+                  ${activeEmployees.map((employee) => `<option value="${employee.employee_id}">${employee.name}</option>`).join('')}
+                </select>`
+              : '<input name="assigned_worker" placeholder="Worker name" />'
+            }
           </label>
           <label>Route Area / Name
             <input name="route_name" placeholder="North Route, Franklin Route, Commercial Route" required />
@@ -178,7 +198,7 @@ export function renderRouteBuilder(state, date = today()) {
         </div>
         <h4>Scheduled stops for ${routeDay} preview (${date})</h4>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
+          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes, employeesById)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
       </form>
 
@@ -213,18 +233,23 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
     const selectedVisitIds = [...new Set(formData.getAll('visit_id'))].filter((visitId) => !assignmentMap.has(visitId));
     const routeDay = String(formData.get('route_day') || weekdayForDate(dateInput?.value || today())).trim();
     const routeName = String(formData.get('route_name') || '').trim();
-    const assignedWorker = String(formData.get('assigned_worker') || '').trim();
+    const employeeId = String(formData.get('employee_id') || '').trim();
+    const selectedEmployee = (state.employees || []).find((employee) => employee.employee_id === employeeId);
+    const assignedWorker = isProductionMode()
+      ? selectedEmployee?.name || ''
+      : String(formData.get('assigned_worker') || '').trim();
     const routeDate = dateInput?.value || today();
 
     if (!routeName || selectedVisitIds.length === 0) return;
 
     const result = await saveRouteWithStops(
       {
-      company_id: state.company?.company_id,
-      name: routeName,
-      route_day: routeDay,
-      route_date: routeDate,
-        assigned_worker: assignedWorker
+        company_id: state.company?.company_id,
+        name: routeName,
+        route_day: routeDay,
+        route_date: routeDate,
+        assigned_worker: assignedWorker,
+        employee_id: employeeId || undefined
       },
       selectedVisitIds
     );

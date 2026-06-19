@@ -1,7 +1,7 @@
 import { reorderRouteStops } from './services/routeService.js';
 
-function moveVisit(direction, visitId) {
-  const state = reorderRouteStops(visitId, direction);
+async function moveVisit(direction, visitId) {
+  const state = await reorderRouteStops(visitId, direction);
   if (!state) return;
   location.reload();
 }

@@ -1,5 +1,5 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -69,6 +69,7 @@ function writeLocalCustomers(customers, metadata = {}) {
 }
 
 async function ensureSupabaseCompany(state, companyId = state.company?.company_id) {
+  if (isProductionMode()) return true;
   const company = state.company;
   if (!companyId) return false;
 
@@ -271,9 +272,12 @@ export async function createCustomer(customerInput = {}) {
 
 export async function updateCustomer(customerId, patch = {}, metadata = {}) {
   const state = readState();
+  const sourceCustomers = isProductionMode()
+    ? await readSupabaseCustomers(await resolveRepositoryCompanyId())
+    : (state.customers || []);
   let updatedCustomer = null;
 
-  const customers = state.customers || [];
+  const customers = requireRemoteResult(sourceCustomers, 'Production customer read failed.') || [];
   const nextCustomers = customers.map((customer) => {
     if (customer.customer_id !== customerId) return customer;
     updatedCustomer = {

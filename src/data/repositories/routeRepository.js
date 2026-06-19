@@ -1,6 +1,7 @@
 import { emit } from '../appEventBus.js';
-import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
+import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
+import { deleteRouteStopForVisit, upsertRouteStopsForRoute } from './routeStopRepository.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
@@ -212,6 +213,11 @@ export async function createRoute(routeInput = {}, metadata = {}) {
     await writeSupabaseRoute(route),
     'Production route create failed.'
   ) || route;
+  await upsertRouteStopsForRoute(persistedRoute, {
+    ...metadata,
+    action: 'route-stops:create-route',
+    eventAction: 'create-route'
+  });
   writeLocalRoutes([...(state.routes || []), persistedRoute], {
     ...metadata,
     action: metadata.action || 'route:create',
@@ -230,9 +236,12 @@ export async function createRoute(routeInput = {}, metadata = {}) {
 
 export async function updateRoute(routeId, patch = {}, metadata = {}) {
   const state = readState();
+  const currentRoutes = isProductionMode()
+    ? await readSupabaseRoutes(await resolveRepositoryCompanyId())
+    : (state.routes || []);
   let updatedRoute = null;
 
-  const routes = state.routes || [];
+  const routes = requireRemoteResult(currentRoutes, 'Production route read failed.') || [];
   const nextRoutes = routes.map((route) => {
     if (route.route_id !== routeId) return route;
     updatedRoute = {
@@ -247,6 +256,11 @@ export async function updateRoute(routeId, patch = {}, metadata = {}) {
     await writeSupabaseRoute(updatedRoute),
     'Production route update failed.'
   ) || updatedRoute;
+  await upsertRouteStopsForRoute(persistedRoute, {
+    ...metadata,
+    action: 'route-stops:update-route',
+    eventAction: 'update-route'
+  });
   const persistedRoutes = nextRoutes.map((route) => (
     route.route_id === routeId ? persistedRoute : route
   ));
@@ -269,7 +283,9 @@ export async function updateRoute(routeId, patch = {}, metadata = {}) {
 
 export async function deleteRoute(routeId, metadata = {}) {
   const state = readState();
-  const route = (state.routes || []).find((item) => item.route_id === routeId);
+  const route = isProductionMode()
+    ? await readSupabaseRoute(routeId)
+    : (state.routes || []).find((item) => item.route_id === routeId);
   if (!route) return null;
 
   requireRemoteResult(
@@ -293,7 +309,7 @@ export async function deleteRoute(routeId, metadata = {}) {
 }
 
 export async function addStopsToRoute(routeId, visitIds = [], metadata = {}) {
-  const route = getRoute(routeId);
+  const route = isProductionMode() ? await readSupabaseRoute(routeId) : getRoute(routeId);
   if (!route) return null;
 
   return updateRoute(
@@ -309,10 +325,10 @@ export async function addStopsToRoute(routeId, visitIds = [], metadata = {}) {
 }
 
 export async function removeStopFromRoute(routeId, visitId, metadata = {}) {
-  const route = getRoute(routeId);
+  const route = isProductionMode() ? await readSupabaseRoute(routeId) : getRoute(routeId);
   if (!route) return null;
 
-  return updateRoute(
+  const updatedRoute = await updateRoute(
     routeId,
     { visit_ids: (route.visit_ids || []).filter((id) => id !== visitId) },
     {
@@ -322,6 +338,12 @@ export async function removeStopFromRoute(routeId, visitId, metadata = {}) {
       visit_id: visitId
     }
   );
+  await deleteRouteStopForVisit(routeId, visitId, {
+    ...metadata,
+    action: 'route-stops:remove-stop',
+    eventAction: 'remove-stop'
+  });
+  return updatedRoute;
 }
 
 export function moveStopToRoute(routeId, visitId, metadata = {}) {
@@ -333,7 +355,33 @@ export function moveStopToRoute(routeId, visitId, metadata = {}) {
   });
 }
 
-export function reorderRouteStops(visitId, direction, metadata = {}) {
+export async function reorderRouteStops(visitId, direction, metadata = {}) {
+  if (isProductionMode()) {
+    const routes = await readSupabaseRoutes(await resolveRepositoryCompanyId());
+    const route = (requireRemoteResult(routes, 'Production route read failed.') || [])
+      .find((item) => (item.visit_ids || []).includes(visitId));
+    if (!route) return null;
+
+    const visitIds = [...(route.visit_ids || [])];
+    const index = visitIds.indexOf(visitId);
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (index === -1 || swapIndex < 0 || swapIndex >= visitIds.length) return null;
+
+    const temp = visitIds[index];
+    visitIds[index] = visitIds[swapIndex];
+    visitIds[swapIndex] = temp;
+
+    await updateRoute(route.route_id, { visit_ids: visitIds }, {
+      ...metadata,
+      action: metadata.action || 'route:reorder-stops',
+      eventAction: metadata.eventAction || 'reorder-stops',
+      visit_id: visitId,
+      direction
+    });
+
+    return clone(visitIds);
+  }
+
   const state = readState();
   const visits = [...(state.visits || [])];
   const index = visits.findIndex((visit) => visit.visit_id === visitId);
@@ -371,7 +419,10 @@ export function reorderRouteStops(visitId, direction, metadata = {}) {
 export function assignWorkerToRoute(routeId, assignedWorker, metadata = {}) {
   return updateRoute(
     routeId,
-    { assigned_worker: assignedWorker },
+    {
+      assigned_worker: assignedWorker,
+      employee_id: metadata.employee_id
+    },
     {
       ...metadata,
       action: metadata.action || 'route:assign-worker',

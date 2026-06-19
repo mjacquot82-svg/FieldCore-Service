@@ -406,7 +406,19 @@ function renderWorkerRoute(session) {
   const todayDate = today();
   const customers = getCustomerMap(state);
   const properties = getPropertyMap(state);
-  const assignedVisits = state.visits.filter((visit) => visit.visit_date === todayDate && visit.assigned_worker === session.name);
+  const assignedRouteIds = new Set((state.routes || [])
+    .filter((route) => route.route_date === todayDate && route.employee_id === session.employee_id)
+    .map((route) => route.route_id));
+  const assignedRouteVisitIds = new Set((state.routes || [])
+    .filter((route) => route.route_date === todayDate && route.employee_id === session.employee_id)
+    .flatMap((route) => route.visit_ids || []));
+  const assignedVisits = state.visits.filter((visit) => {
+    if (visit.visit_date !== todayDate) return false;
+    if (isProductionMode()) {
+      return assignedRouteIds.has(visit.route_id) || assignedRouteVisitIds.has(visit.visit_id);
+    }
+    return visit.assigned_worker === session.name;
+  });
   const completed = assignedVisits.filter((visit) => visit.status === 'completed').length;
   const remaining = assignedVisits.filter((visit) => !['completed', 'skipped'].includes(visit.status)).length;
 
