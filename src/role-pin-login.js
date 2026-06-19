@@ -14,6 +14,10 @@ import {
   verifyAdminPin,
   verifyEmployeePin
 } from './services/pinVerificationService.js';
+import {
+  formatUserError,
+  logOperationalEvent
+} from './services/operationalLogger.js';
 import { escapeAttr, escapeHtml } from './utils/renderSecurity.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
@@ -192,7 +196,7 @@ export function bindLoginEvents() {
       const result = await signInWithPassword(email, password);
 
       if (!result.session) {
-        window.alert(result.error?.message || 'Supabase login failed.');
+        window.alert(formatUserError(result.error, 'Sign in failed. Check your email and password and try again.'));
         return;
       }
 
@@ -222,7 +226,15 @@ export function bindLoginEvents() {
 
       const diagnostics = isProductionMode() ? await validateRepositoryAuthContext() : null;
       if (isProductionMode() && !diagnostics.ready) {
-        window.alert('Active Supabase membership is required before PIN login.');
+        logOperationalEvent({
+          category: 'membership',
+          severity: 'warning',
+          action: 'admin-pin-membership-blocked',
+          message: 'Admin PIN accepted but production membership was not ready.',
+          userMessage: 'Your company access could not be verified.',
+          details: diagnostics
+        });
+        window.alert('Your company access could not be verified.');
         return;
       }
 
@@ -256,7 +268,18 @@ export function bindLoginEvents() {
 
       const diagnostics = isProductionMode() ? await validateRepositoryAuthContext() : null;
       if (isProductionMode() && (!diagnostics.ready || diagnostics.employeeId !== employee.employee_id)) {
-        window.alert('Active Supabase employee membership is required before employee PIN login.');
+        logOperationalEvent({
+          category: 'membership',
+          severity: 'warning',
+          action: 'employee-pin-membership-blocked',
+          message: 'Employee PIN accepted but production employee membership was not ready.',
+          userMessage: 'Your employee access could not be verified.',
+          details: {
+            ...diagnostics,
+            selectedEmployeeId: employee.employee_id
+          }
+        });
+        window.alert('Your employee access could not be verified.');
         return;
       }
 

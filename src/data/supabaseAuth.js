@@ -2,6 +2,7 @@ import {
   getSupabaseConfig,
   setSupabaseAccessTokenProvider
 } from './supabaseClient.js';
+import { logOperationalError, logOperationalEvent } from '../services/operationalLogger.js';
 
 const AUTH_SESSION_KEY = 'fieldcore_supabase_auth_session_v1';
 const EXPIRY_SKEW_SECONDS = 60;
@@ -15,7 +16,8 @@ function readStoredAuthSession() {
 
   try {
     return JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || 'null');
-  } catch {
+  } catch (error) {
+    logOperationalError('authentication', 'auth-session-read', error, {}, 'Your saved session could not be read.');
     return null;
   }
 }
@@ -50,7 +52,16 @@ function isExpired(session) {
 
 async function authRequest(path, { method = 'GET', body, accessToken } = {}) {
   const config = getSupabaseConfig();
-  if (!config) return { data: null, error: null, configured: false };
+  if (!config) {
+    logOperationalEvent({
+      category: 'authentication',
+      severity: 'warning',
+      action: `auth:${path}`,
+      message: 'Supabase Auth request skipped because Supabase is not configured.',
+      userMessage: 'Supabase is not configured.'
+    });
+    return { data: null, error: null, configured: false };
+  }
 
   try {
     const response = await fetch(`${config.url}/auth/v1/${path}`, {
@@ -69,16 +80,40 @@ async function authRequest(path, { method = 'GET', body, accessToken } = {}) {
     });
 
     if (!response.ok) {
+      const responseText = await response.text();
+      const error = new Error(`Supabase Auth request failed with ${response.status}: ${responseText}`);
+      logOperationalError(
+        'authentication',
+        `auth:${path}`,
+        error,
+        { status: response.status },
+        'Sign in failed. Check your credentials and try again.'
+      );
       return {
         data: null,
-        error: new Error(`Supabase Auth request failed with ${response.status}: ${await response.text()}`),
+        error,
         configured: true
       };
     }
 
+    logOperationalEvent({
+      category: 'authentication',
+      severity: 'info',
+      action: `auth:${path}`,
+      message: 'Supabase Auth request completed.',
+      details: { status: response.status }
+    });
+
     if (response.status === 204) return { data: null, error: null, configured: true };
     return { data: await response.json(), error: null, configured: true };
   } catch (error) {
+    logOperationalError(
+      'authentication',
+      `auth:${path}`,
+      error,
+      {},
+      'Authentication service could not be reached.'
+    );
     return { data: null, error, configured: true };
   }
 }
@@ -98,6 +133,13 @@ export async function signInWithPassword(email, password) {
   if (!session) return { session: null, error: new Error('Supabase Auth did not return a session.'), configured: true };
 
   writeStoredAuthSession(session);
+  logOperationalEvent({
+    category: 'authentication',
+    severity: 'info',
+    action: 'sign-in-success',
+    message: 'Supabase user signed in.',
+    details: { userId: session.user?.id || null, email: session.user?.email || null }
+  });
   return { session, error: null, configured: true };
 }
 
@@ -117,6 +159,13 @@ export async function refreshAuthSession(session = readStoredAuthSession()) {
   if (!nextSession) return { session: null, error: new Error('Supabase Auth did not return a refreshed session.'), configured: true };
 
   writeStoredAuthSession(nextSession);
+  logOperationalEvent({
+    category: 'authentication',
+    severity: 'info',
+    action: 'session-refresh-success',
+    message: 'Supabase session refreshed.',
+    details: { userId: nextSession.user?.id || null }
+  });
   return { session: nextSession, error: null, configured: true };
 }
 
@@ -138,7 +187,16 @@ export async function getAuthenticatedUser() {
     accessToken: session.access_token
   });
 
-  if (!response.configured || response.error) return null;
+  if (!response.configured || response.error) {
+    logOperationalEvent({
+      category: 'authentication',
+      severity: 'warning',
+      action: 'authenticated-user-read-failed',
+      message: 'Authenticated user could not be loaded.',
+      userMessage: 'Your session could not be verified.'
+    });
+    return null;
+  }
   return response.data || null;
 }
 
@@ -152,6 +210,12 @@ export async function signOut() {
   }
 
   clearStoredAuthSession();
+  logOperationalEvent({
+    category: 'authentication',
+    severity: 'info',
+    action: 'sign-out',
+    message: 'Supabase user signed out.'
+  });
   return true;
 }
 

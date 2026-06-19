@@ -45,6 +45,13 @@ import {
 import { validateRepositoryAuthContext } from './data/repositoryContext.js';
 import { syncFoundationFromSupabase } from './data/supabaseFoundation.js';
 import {
+  clearOperationalLogs,
+  formatUserError,
+  getOperationalLogs,
+  logOperationalError,
+  logOperationalEvent
+} from './services/operationalLogger.js';
+import {
   allowedNavItems,
   canAccessView,
   getDefaultView,
@@ -697,7 +704,33 @@ function renderPayments(customerMap) {
 
 function renderSettings() {
   const permissions = getUiPermissions(currentSession);
-  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${escapeHtml(state.company.name)}</p><p>Company ID: ${escapeHtml(state.company.company_id)}</p><p>Invoice Prefix: ${escapeHtml(state.settings.invoice_prefix)}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p>${permissions.settings.resetDemoData ? '<button id="reset-seed">Reset Demo Data</button>' : ''}</article></section>`;
+  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${escapeHtml(state.company.name)}</p><p>Company ID: ${escapeHtml(state.company.company_id)}</p><p>Invoice Prefix: ${escapeHtml(state.settings.invoice_prefix)}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p>${permissions.settings.resetDemoData ? '<button id="reset-seed">Reset Demo Data</button>' : ''}${renderOperationalLogPanel()}</article></section>`;
+}
+
+function renderOperationalLogPanel() {
+  const permissions = getUiPermissions(currentSession);
+  if (!permissions.settings.read) return '';
+  const logs = getOperationalLogs().slice(-20).reverse();
+  return `
+    <hr />
+    <h3>Operational Diagnostics</h3>
+    <p>Recent application events for support review.</p>
+    <div class="stack">
+      ${logs.length ? logs.map((entry) => `
+        <article class="operational-log-entry">
+          <div class="customer-card-header">
+            <div>
+              <h4>${escapeHtml(entry.severity)} · ${escapeHtml(entry.category)} · ${escapeHtml(entry.action)}</h4>
+              <p>${escapeHtml(entry.timestamp)}</p>
+            </div>
+          </div>
+          <p>${escapeHtml(entry.userMessage || entry.message)}</p>
+          <p><small>${escapeHtml(entry.error?.message || entry.message)}</small></p>
+        </article>
+      `).join('') : '<article class="operational-log-entry"><p>No operational events recorded yet.</p></article>'}
+    </div>
+    ${permissions.settings.write ? '<button type="button" data-clear-operational-logs>Clear Diagnostics</button>' : ''}
+  `;
 }
 
 function metricCard(label, value) {
@@ -710,13 +743,30 @@ function reloadStateAndRender() {
 }
 
 function denyUiAction(message = 'You do not have permission for that action.') {
+  logOperationalEvent({
+    category: 'authorization',
+    severity: 'warning',
+    action: 'ui-permission-denied',
+    message,
+    userMessage: message,
+    details: {
+      activeView,
+      role: getUiPermissions(currentSession).role,
+      session: currentSession
+    }
+  });
   flashMessage = message;
   render();
   return false;
 }
 
 function showOperationError(error) {
-  flashMessage = error?.message || 'Operation failed.';
+  const userMessage = formatUserError(error);
+  logOperationalError('repository', 'ui-operation-failed', error, {
+    activeView,
+    role: getUiPermissions(currentSession).role
+  }, userMessage);
+  flashMessage = userMessage;
   render();
 }
 
@@ -843,10 +893,20 @@ function bindEvents() {
   });
   const resetButton = app.querySelector('#reset-seed');
   if (resetButton) resetButton.addEventListener('click', () => { if (!getUiPermissions(currentSession).settings.resetDemoData) return denyUiAction(); state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; selectedRouteBuilderDate = today(); showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
+  const clearLogsButton = app.querySelector('[data-clear-operational-logs]');
+  if (clearLogsButton) clearLogsButton.addEventListener('click', () => { if (!getUiPermissions(currentSession).settings.write) return denyUiAction(); clearOperationalLogs(); flashMessage = 'Operational diagnostics cleared.'; render(); });
   app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { if (!getUiPermissions(currentSession).customers.ledger) return denyUiAction(); flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
 }
 
 async function initializeApp() {
+  logOperationalEvent({
+    category: 'startup',
+    severity: 'info',
+    action: 'app-initialize-start',
+    message: 'Application startup began.',
+    details: { mode: getAppMode() }
+  });
+
   if (isProductionMode()) {
     const diagnostics = await validateRepositoryAuthContext();
     productionAuthDiagnostics = diagnostics;
@@ -856,12 +916,28 @@ async function initializeApp() {
     });
 
     if (!diagnostics.transport?.configured) {
+      logOperationalEvent({
+        category: 'startup',
+        severity: 'critical',
+        action: 'production-unconfigured',
+        message: requirementMessage,
+        userMessage: requirementMessage,
+        details: diagnostics
+      });
       productionModeBlockedReason = requirementMessage;
       await render();
       return;
     }
 
     if (!diagnostics.ready) {
+      logOperationalEvent({
+        category: 'membership',
+        severity: 'warning',
+        action: 'production-auth-context-not-ready',
+        message: requirementMessage || 'Production auth context is not ready.',
+        userMessage: requirementMessage || 'Your company access could not be verified.',
+        details: diagnostics
+      });
       clearSession();
       currentSession = null;
       productionModeBlockedReason = '';
@@ -871,16 +947,32 @@ async function initializeApp() {
   }
 
   try {
-    await syncFoundationFromSupabase();
+    const syncSummary = await syncFoundationFromSupabase();
+    logOperationalEvent({
+      category: 'synchronization',
+      severity: 'info',
+      action: 'startup-sync-success',
+      message: 'Startup synchronization completed.',
+      details: syncSummary
+    });
   } catch (error) {
     if (isProductionMode()) {
-      productionModeBlockedReason = error?.message || 'Production Supabase sync failed.';
+      const userMessage = 'Production data could not be loaded. Please contact support.';
+      logOperationalError('startup', 'startup-sync-failed', error, {}, userMessage);
+      productionModeBlockedReason = userMessage;
       await render();
       return;
     }
   }
   state = loadState();
   currentSession = getSession();
+  logOperationalEvent({
+    category: 'startup',
+    severity: 'info',
+    action: 'app-initialize-complete',
+    message: 'Application startup completed.',
+    details: { activeView, hasSession: Boolean(currentSession) }
+  });
   await render();
 }
 

@@ -1,3 +1,5 @@
+import { logOperationalError, logOperationalEvent } from '../services/operationalLogger.js';
+
 const CONFIG_STORAGE_KEY = 'fieldcore_supabase_config_v1';
 let accessTokenProvider = null;
 
@@ -6,7 +8,8 @@ function readStoredConfig() {
 
   try {
     return JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY) || 'null');
-  } catch {
+  } catch (error) {
+    logOperationalError('startup', 'supabase-config-read', error, {}, 'Supabase configuration could not be read.');
     return null;
   }
 }
@@ -41,9 +44,22 @@ async function getAuthorizationToken(config) {
 
   try {
     return (await accessTokenProvider()) || config.anonKey;
-  } catch {
+  } catch (error) {
+    logOperationalError('authentication', 'supabase-token-provider', error, {}, 'Your session could not be verified.');
     return config.anonKey;
   }
+}
+
+function categoryForTable(table) {
+  if (table.includes('rpc/generate_billing_invoices')) return 'billing';
+  if (table.includes('rpc/record_invoice_payment')) return 'payments';
+  if (table.includes('settings')) return 'settings';
+  return 'repository';
+}
+
+function actionForRequest(table, method) {
+  if (table.startsWith('rpc/')) return `rpc:${table.slice(4)}`;
+  return `${method.toLowerCase()}:${table}`;
 }
 
 export async function getSupabaseTransportContext() {
@@ -68,7 +84,19 @@ export async function getSupabaseTransportContext() {
 
 async function supabaseRequest(table, { method = 'GET', params = {}, body, headers = {} } = {}) {
   const config = getSupabaseConfig();
-  if (!config) return { data: null, error: null, configured: false };
+  const category = categoryForTable(table);
+  const action = actionForRequest(table, method);
+  if (!config) {
+    logOperationalEvent({
+      category: 'startup',
+      severity: 'warning',
+      action: 'supabase-request-unconfigured',
+      message: 'Supabase request skipped because Supabase is not configured.',
+      userMessage: 'Supabase is not configured.',
+      details: { table, method }
+    });
+    return { data: null, error: null, configured: false };
+  }
   const authorizationToken = await getAuthorizationToken(config);
 
   const url = new URL(`${config.url}/rest/v1/${table}`);
@@ -96,12 +124,29 @@ async function supabaseRequest(table, { method = 'GET', params = {}, body, heade
     });
 
     if (!response.ok) {
+      const responseText = await response.text();
+      const error = new Error(`Supabase request failed with ${response.status}: ${responseText}`);
+      logOperationalError(
+        category,
+        action,
+        error,
+        { table, method, status: response.status, params },
+        'The server rejected the request. Please contact support if this continues.'
+      );
       return {
         data: null,
-        error: new Error(`Supabase request failed with ${response.status}: ${await response.text()}`),
+        error,
         configured: true
       };
     }
+
+    logOperationalEvent({
+      category,
+      severity: 'info',
+      action,
+      message: 'Supabase request completed.',
+      details: { table, method, status: response.status }
+    });
 
     if (response.status === 204) return { data: null, error: null, configured: true };
 
@@ -111,6 +156,13 @@ async function supabaseRequest(table, { method = 'GET', params = {}, body, heade
       configured: true
     };
   } catch (error) {
+    logOperationalError(
+      category,
+      action,
+      error,
+      { table, method, params },
+      'The server could not be reached. Check your connection and try again.'
+    );
     return { data: null, error, configured: true };
   }
 }

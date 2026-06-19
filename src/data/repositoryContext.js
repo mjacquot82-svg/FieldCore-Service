@@ -3,6 +3,7 @@ import { isProductionMode } from './appMode.js';
 import { getCompanyMembershipForUser } from './repositories/companyMembershipRepository.js';
 import { getSupabaseTransportContext } from './supabaseClient.js';
 import { readState } from './storage/local-state-adapter.js';
+import { logOperationalEvent } from '../services/operationalLogger.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -49,6 +50,22 @@ export async function resolveRepositoryCompanyContext() {
     source: membership?.company_id ? 'authenticated-membership' : 'local-state'
   };
 
+  logOperationalEvent({
+    category: 'membership',
+    severity: activeRepositoryContext.authenticated && !membership ? 'warning' : 'info',
+    action: 'resolve-company-context',
+    message: membership ? 'Company membership resolved.' : 'Company membership was not resolved.',
+    userMessage: membership ? '' : 'No active company access was found for this user.',
+    details: {
+      authenticated: Boolean(user),
+      userId: user?.id || null,
+      membershipId: membership?.membership_id || null,
+      companyId,
+      role: membership?.role || null,
+      source: activeRepositoryContext.source
+    }
+  });
+
   return getActiveRepositoryContext();
 }
 
@@ -80,7 +97,7 @@ export async function validateRepositoryAuthContext() {
     membershipUserLinked
   );
 
-  return {
+  const diagnostics = {
     ready: authenticated && membershipActive && membershipUserLinked && companyResolved && transportAuthenticated,
     authenticated,
     transportAuthenticated,
@@ -96,4 +113,15 @@ export async function validateRepositoryAuthContext() {
     source: context?.source || null,
     transport
   };
+
+  logOperationalEvent({
+    category: diagnostics.ready ? 'authorization' : 'membership',
+    severity: diagnostics.ready ? 'info' : 'warning',
+    action: 'validate-auth-context',
+    message: diagnostics.ready ? 'Production auth context is ready.' : 'Production auth context is incomplete.',
+    userMessage: diagnostics.ready ? '' : 'Your company access could not be verified.',
+    details: diagnostics
+  });
+
+  return diagnostics;
 }

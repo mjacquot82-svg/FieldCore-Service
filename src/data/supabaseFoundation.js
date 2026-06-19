@@ -12,15 +12,48 @@ import { syncShiftsFromSupabase } from './repositories/shiftRepository.js';
 import { syncVisitsFromSupabase } from './repositories/visitRepository.js';
 import { resolveRepositoryCompanyContext } from './repositoryContext.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
+import { logOperationalError, logOperationalEvent } from '../services/operationalLogger.js';
 
 function requireProductionSync(value, label) {
-  if (value !== null || !isProductionMode()) return value;
-  throw new Error(`Production Supabase sync failed for ${label}.`);
+  if (value !== null || !isProductionMode()) {
+    logOperationalEvent({
+      category: 'synchronization',
+      severity: 'info',
+      action: `sync:${label}`,
+      message: `Supabase sync completed for ${label}.`,
+      details: { label, synced: Boolean(value) }
+    });
+    return value;
+  }
+  const error = new Error(`Production Supabase sync failed for ${label}.`);
+  logOperationalError(
+    'synchronization',
+    `sync:${label}`,
+    error,
+    { label },
+    'Production data could not be synchronized.'
+  );
+  throw error;
 }
 
 export async function syncFoundationFromSupabase() {
-  if (!isSupabaseConfigured()) return { configured: false, synced: false };
+  if (!isSupabaseConfigured()) {
+    logOperationalEvent({
+      category: 'startup',
+      severity: isProductionMode() ? 'critical' : 'warning',
+      action: 'sync-skipped-unconfigured',
+      message: 'Supabase foundation sync skipped because Supabase is not configured.',
+      userMessage: 'Supabase is not configured.'
+    });
+    return { configured: false, synced: false };
+  }
 
+  logOperationalEvent({
+    category: 'startup',
+    severity: 'info',
+    action: 'sync-foundation-start',
+    message: 'Starting Supabase foundation sync.'
+  });
   const initialAuthContext = await resolveRepositoryCompanyContext();
   const companyMemberships = requireProductionSync(
     await syncCompanyMembershipsFromSupabase(),
@@ -40,7 +73,7 @@ export async function syncFoundationFromSupabase() {
   const payments = requireProductionSync(await syncPaymentsFromSupabase(), 'payments');
   const shifts = requireProductionSync(await syncShiftsFromSupabase(), 'shifts');
 
-  return {
+  const summary = {
     configured: true,
     synced: Boolean(settings || employees || companyMemberships || customers || properties || visits || routes || routeStops || invoices || payments || shifts),
     settings: Boolean(settings),
@@ -56,4 +89,14 @@ export async function syncFoundationFromSupabase() {
     payments: Boolean(payments),
     shifts: Boolean(shifts)
   };
+
+  logOperationalEvent({
+    category: 'startup',
+    severity: 'info',
+    action: 'sync-foundation-complete',
+    message: 'Supabase foundation sync completed.',
+    details: summary
+  });
+
+  return summary;
 }
