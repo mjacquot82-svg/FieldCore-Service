@@ -126,6 +126,7 @@ export async function getCurrentAuthSession() {
   if (!isExpired(session)) return session;
 
   const refreshed = await refreshAuthSession(session);
+  if (!refreshed.session) clearStoredAuthSession();
   return refreshed.session;
 }
 

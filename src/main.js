@@ -5,7 +5,12 @@ import {
   loadState,
   resetSeed
 } from './lib/store.js';
-import { getSession, clearSession, renderLogin } from './role-pin-login.js';
+import {
+  getSession,
+  clearSession,
+  clearAuthenticatedSession,
+  renderLogin
+} from './role-pin-login.js';
 import { renderRouteBuilder, bindRouteBuilderEvents } from './route-builder.js';
 import { renderEmployees, bindEmployeeEvents } from './employees.js';
 import {
@@ -41,8 +46,8 @@ import { validateRepositoryAuthContext } from './data/repositoryContext.js';
 import { syncFoundationFromSupabase } from './data/supabaseFoundation.js';
 
 const app = document.querySelector('#app');
-let state = loadState();
-let currentSession = getSession();
+let state = isProductionMode() ? {} : loadState();
+let currentSession = isProductionMode() ? null : getSession();
 let activeView = ['employee', 'worker'].includes(String(currentSession?.role || '').toLowerCase()) ? 'worker-route' : 'dashboard';
 let flashMessage = '';
 let selectedRouteDate = new Date().toISOString().slice(0, 10);
@@ -742,8 +747,8 @@ function bindEvents() {
     render();
   }));
   const logoutButton = app.querySelector('[data-logout]');
-  if (logoutButton) logoutButton.addEventListener('click', () => {
-    clearSession();
+  if (logoutButton) logoutButton.addEventListener('click', async () => {
+    await clearAuthenticatedSession();
     currentSession = null;
     activeView = 'dashboard';
     selectedCustomerId = '';
@@ -760,13 +765,22 @@ function bindEvents() {
 async function initializeApp() {
   if (isProductionMode()) {
     const diagnostics = await validateRepositoryAuthContext();
-    productionModeBlockedReason = getProductionModeRequirementMessage({
+    const requirementMessage = getProductionModeRequirementMessage({
       ...diagnostics,
       supabaseConfigured: Boolean(diagnostics.transport?.configured)
     });
 
-    if (productionModeBlockedReason) {
+    if (!diagnostics.transport?.configured) {
+      productionModeBlockedReason = requirementMessage;
       await render();
+      return;
+    }
+
+    if (!diagnostics.ready) {
+      clearSession();
+      currentSession = null;
+      productionModeBlockedReason = '';
+      await renderLogin();
       return;
     }
   }

@@ -1,7 +1,15 @@
+import { isProductionMode } from './data/appMode.js';
 import { listActiveEmployees } from './data/repositories/employeeRepository.js';
 import {
   ensureDefaultAdminPin as ensureDefaultAdminPinRecord
 } from './data/repositories/settingsRepository.js';
+import { validateRepositoryAuthContext } from './data/repositoryContext.js';
+import {
+  getAuthenticatedUser,
+  signInWithPassword,
+  signOut
+} from './data/supabaseAuth.js';
+import { isSupabaseConfigured } from './data/supabaseClient.js';
 import {
   verifyAdminPin,
   verifyEmployeePin
@@ -34,6 +42,11 @@ export function clearSession() {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
+export async function clearAuthenticatedSession() {
+  clearSession();
+  if (isProductionMode()) await signOut();
+}
+
 export async function ensureDefaultAdminPin(state) {
   if (!state) return;
   if (state.settings?.admin_pin || state.settings?.admin_pin_hash) return;
@@ -44,26 +57,102 @@ export function activeEmployees(state) {
   return state ? (state.employees || []).filter((employee) => employee.status === 'active') : listActiveEmployees();
 }
 
+function productionAuthLoginCard(message = '') {
+  return `
+    <div class="login-shell">
+      <section class="panel login-card">
+        <h1>FieldCore Login</h1>
+        <p>Production mode requires a Supabase user before company access or PIN shortcuts are available.</p>
+        ${message ? `<div class="flash">${message}</div>` : ''}
+        <form id="supabase-login-form" class="service-form">
+          <h3>Supabase Account</h3>
+          <label>Email
+            <input name="email" type="email" autocomplete="email" required />
+          </label>
+          <label>Password
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary" type="submit">Login</button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function productionMembershipBlockedCard(diagnostics) {
+  const reason = !diagnostics.membershipActive
+    ? 'No active company membership was found for this Supabase user.'
+    : !diagnostics.membershipUserLinked
+      ? 'The active company membership is not linked to this Supabase user.'
+      : !diagnostics.companyResolved
+        ? 'No company could be resolved for this Supabase user.'
+        : 'This Supabase user is not ready for production access.';
+
+  return `
+    <div class="login-shell">
+      <section class="panel login-card">
+        <h1>FieldCore Login</h1>
+        <p>${reason}</p>
+        <p>User ID: ${diagnostics.userId || 'unknown'}</p>
+        <button class="primary" data-supabase-logout>Logout</button>
+      </section>
+    </div>
+  `;
+}
+
+function productionSessionSummary(diagnostics, user) {
+  if (!isProductionMode()) return '';
+  return `
+    <div class="flash session-banner">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+        <div>
+          <strong>${user?.email || user?.id || 'Supabase user'}</strong>
+          <span style="color:#475569;font-size:0.95rem;">(${diagnostics.role || 'member'})</span>
+        </div>
+        <button type="button" data-supabase-logout class="primary">Logout Supabase</button>
+      </div>
+    </div>
+  `;
+}
+
+function filterEmployeesForProductionMembership(employees, diagnostics) {
+  if (!isProductionMode() || diagnostics.role !== 'employee') return employees;
+  if (!diagnostics.employeeId) return [];
+  return employees.filter((employee) => employee.employee_id === diagnostics.employeeId);
+}
+
 async function loginCard() {
+  const diagnostics = isProductionMode() ? await validateRepositoryAuthContext() : null;
+
+  if (isProductionMode()) {
+    if (!isSupabaseConfigured()) return productionAuthLoginCard('Supabase is not configured.');
+    if (!diagnostics.authenticated || !diagnostics.transportAuthenticated) return productionAuthLoginCard();
+    if (!diagnostics.ready) return productionMembershipBlockedCard(diagnostics);
+  }
+
   const state = loadState();
   await ensureDefaultAdminPin(state);
-  const employees = activeEmployees(state);
+  const user = isProductionMode() ? await getAuthenticatedUser() : null;
+  const employees = filterEmployeesForProductionMembership(activeEmployees(state), diagnostics || {});
+  const canUseAdminPin = !isProductionMode() || ['owner', 'admin', 'manager'].includes(diagnostics?.role);
+  const canUseEmployeePin = !isProductionMode() || diagnostics?.role === 'employee';
 
   return `
     <div class="login-shell">
       <section class="panel login-card">
         <h1>FieldCore Login</h1>
         <p>Owners/admins get full access. Employees use their PIN to see assigned route work.</p>
+        ${productionSessionSummary(diagnostics || {}, user)}
 
-        <form id="admin-login-form" class="service-form">
+        ${canUseAdminPin ? `<form id="admin-login-form" class="service-form">
           <h3>Owner / Admin</h3>
           <label>Admin PIN
             <input name="admin_pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="0000" required />
           </label>
           <button class="primary" type="submit">Login as Admin</button>
-        </form>
+        </form>` : ''}
 
-        <form id="employee-login-form" class="service-form worker-login-form">
+        ${canUseEmployeePin ? `<form id="employee-login-form" class="service-form worker-login-form">
           <h3>Employee</h3>
           <label>Employee
             <select name="employee_id" required>
@@ -76,7 +165,7 @@ async function loginCard() {
           </label>
           <button class="primary" type="submit" ${employees.length ? '' : 'disabled'}>Login as Employee</button>
           ${employees.length ? '' : '<p>Add employees from the Employees screen after logging in as admin.</p>'}
-        </form>
+        </form>` : ''}
       </section>
     </div>
   `;
@@ -92,6 +181,31 @@ export function renderLogin() {
 }
 
 export function bindLoginEvents() {
+  const supabaseForm = document.querySelector('#supabase-login-form');
+  if (supabaseForm) {
+    supabaseForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const formData = new FormData(supabaseForm);
+      const email = String(formData.get('email') || '').trim();
+      const password = String(formData.get('password') || '');
+      const result = await signInWithPassword(email, password);
+
+      if (!result.session) {
+        window.alert(result.error?.message || 'Supabase login failed.');
+        return;
+      }
+
+      window.location.reload();
+    });
+  }
+
+  document.querySelectorAll('[data-supabase-logout]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await clearAuthenticatedSession();
+      window.location.reload();
+    });
+  });
+
   const adminForm = document.querySelector('#admin-login-form');
   if (adminForm) {
     adminForm.addEventListener('submit', async (event) => {
@@ -105,7 +219,21 @@ export function bindLoginEvents() {
         return;
       }
 
-      setSession({ role: 'admin', name: 'Owner/Admin', started_at: new Date().toISOString() });
+      const diagnostics = isProductionMode() ? await validateRepositoryAuthContext() : null;
+      if (isProductionMode() && !diagnostics.ready) {
+        window.alert('Active Supabase membership is required before PIN login.');
+        return;
+      }
+
+      setSession({
+        role: 'admin',
+        name: 'Owner/Admin',
+        started_at: new Date().toISOString(),
+        auth_user_id: diagnostics?.userId || null,
+        membership_id: diagnostics?.membershipId || null,
+        membership_role: diagnostics?.role || null,
+        company_id: diagnostics?.companyId || null
+      });
       window.location.reload();
     });
   }
@@ -125,11 +253,21 @@ export function bindLoginEvents() {
         return;
       }
 
+      const diagnostics = isProductionMode() ? await validateRepositoryAuthContext() : null;
+      if (isProductionMode() && (!diagnostics.ready || diagnostics.employeeId !== employee.employee_id)) {
+        window.alert('Active Supabase employee membership is required before employee PIN login.');
+        return;
+      }
+
       setSession({
         role: 'worker',
         employee_id: employee.employee_id,
         name: employee.name,
-        started_at: new Date().toISOString()
+        started_at: new Date().toISOString(),
+        auth_user_id: diagnostics?.userId || null,
+        membership_id: diagnostics?.membershipId || null,
+        membership_role: diagnostics?.role || null,
+        company_id: diagnostics?.companyId || null
       });
       window.location.reload();
     });
