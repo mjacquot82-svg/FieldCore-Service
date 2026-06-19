@@ -70,14 +70,24 @@ function renderRouteTargetOptions(savedRoutes, currentRouteId = '', employeesByI
   `).join('');
 }
 
-function renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes = [], employeesById = new Map()) {
+function renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes = [], employeesById = new Map(), permissions = {}) {
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const assignedRoute = routeAssignment.get(visit.visit_id);
   const isRouted = Boolean(assignedRoute);
   const city = (property?.service_address || '').split(',').slice(-2, -1)[0]?.trim();
   const workerName = assignedRoute ? routeWorkerLabel(assignedRoute, employeesById) : (visit.assigned_worker || 'Unassigned worker');
+  const canAssign = Boolean(permissions?.routes?.assign);
   const routeOptions = renderRouteTargetOptions(savedRoutes, assignedRoute?.route_id, employeesById);
+  const routeActions = canAssign ? `
+    <div class="route-stop-actions">
+      <select data-route-target="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>
+        ${routeOptions || '<option value="">No saved routes</option>'}
+      </select>
+      <button type="button" data-route-move-stop="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>${isRouted ? 'Reassign' : 'Assign'}</button>
+      ${isRouted ? `<button type="button" data-route-remove-stop="${visit.visit_id}">Remove from Route</button>` : ''}
+    </div>
+  ` : '';
 
   return `
     <article class="route-stop-card ${isRouted ? 'already-routed' : ''}">
@@ -98,13 +108,7 @@ function renderVisitCheckbox(visit, customers, properties, routeAssignment, save
           ${assignedRoute ? `<span>${assignedRoute.name}</span>` : ''}
         </div>
         ${visit.notes ? `<small>${visit.notes}</small>` : ''}
-        <div class="route-stop-actions">
-          <select data-route-target="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>
-            ${routeOptions || '<option value="">No saved routes</option>'}
-          </select>
-          <button type="button" data-route-move-stop="${visit.visit_id}" ${savedRoutes.length ? '' : 'disabled'}>${isRouted ? 'Reassign' : 'Assign'}</button>
-          ${isRouted ? `<button type="button" data-route-remove-stop="${visit.visit_id}">Remove from Route</button>` : ''}
-        </div>
+        ${routeActions}
       </div>
     </article>
   `;
@@ -139,7 +143,7 @@ function renderSavedRoute(route, state) {
   `;
 }
 
-export function renderRouteBuilder(state, date = today()) {
+export function renderRouteBuilder(state, date = today(), permissions = {}) {
   const customers = getCustomerMap(state);
   const properties = getPropertyMap(state);
   const routeDay = weekdayForDate(date);
@@ -148,6 +152,7 @@ export function renderRouteBuilder(state, date = today()) {
   const routeAssignment = getRouteAssignmentMap(savedRoutes);
   const metrics = getRouteMetrics(visits, savedRoutes);
   const productionMode = isProductionMode();
+  const canCreateRoutes = Boolean(permissions?.routes?.create);
   const activeEmployees = (state.employees || []).filter((employee) => employee.status === 'active');
   const employeesById = employeeNameById(state);
 
@@ -171,7 +176,7 @@ export function renderRouteBuilder(state, date = today()) {
         ${renderRouteStat('Route value', currency(metrics.totalValue))}
       </div>
 
-      <form id="route-builder-form" class="panel service-form route-builder-form">
+      ${canCreateRoutes ? `<form id="route-builder-form" class="panel service-form route-builder-form">
         <div class="route-form-header">
           <div>
             <h3>Create Weekday Route</h3>
@@ -198,9 +203,9 @@ export function renderRouteBuilder(state, date = today()) {
         </div>
         <h4>Scheduled stops for ${routeDay} preview (${date})</h4>
         <div class="route-stop-list">
-          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes, employeesById)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
+          ${visits.length ? visits.map((visit) => renderVisitCheckbox(visit, customers, properties, routeAssignment, savedRoutes, employeesById, permissions)).join('') : '<p>No scheduled visits found for this preview date.</p>'}
         </div>
-      </form>
+      </form>` : '<article class="panel"><p>Your role can review saved routes but cannot create or modify route assignments.</p></article>'}
 
       <div class="route-section-header">
         <h3>Saved ${routeDay} Routes</h3>
@@ -213,7 +218,7 @@ export function renderRouteBuilder(state, date = today()) {
   `;
 }
 
-export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
+export function bindRouteBuilderEvents(state, setRouteBuilderDate, render, permissions = {}) {
   const dateInput = document.querySelector('#route-builder-date');
   if (dateInput) {
     dateInput.addEventListener('change', () => {
@@ -227,6 +232,7 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (!permissions?.routes?.create) return;
 
     const formData = new FormData(form);
     const assignmentMap = getRouteAssignmentMap(state.routes || []);
@@ -260,6 +266,7 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
 
   document.querySelectorAll('[data-route-remove-stop]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (!permissions?.routes?.assign) return;
       const visitId = button.dataset.routeRemoveStop;
       Object.assign(state, await removeStopFromRoutes(visitId));
       render();
@@ -268,6 +275,7 @@ export function bindRouteBuilderEvents(state, setRouteBuilderDate, render) {
 
   document.querySelectorAll('[data-route-move-stop]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (!permissions?.routes?.assign) return;
       const visitId = button.dataset.routeMoveStop;
       const targetSelect = document.querySelector(`[data-route-target="${visitId}"]`);
       const targetRouteId = targetSelect?.value;

@@ -1,4 +1,5 @@
 import { updatePayrollWeekStart } from './data/repositories/settingsRepository.js';
+import { getUiPermissions } from './services/uiPermissionService.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
@@ -20,7 +21,11 @@ function getSession() {
 }
 
 function isWorkerSession(session) {
-  return ['employee', 'worker'].includes(String(session?.role || '').toLowerCase());
+  return getUiPermissions(session).isEmployee;
+}
+
+function permissions() {
+  return getUiPermissions(getSession());
 }
 
 function todayString() {
@@ -132,6 +137,8 @@ function injectEmployeeHoursPanel() {
 }
 
 function ensurePayrollSettingsButton() {
+  const access = permissions();
+  if (!access.settings.read) return;
   const settingsHeading = [...document.querySelectorAll('section h2')]
     .find((heading) => heading.textContent.trim() === 'Settings');
   if (!settingsHeading) return;
@@ -141,14 +148,16 @@ function ensurePayrollSettingsButton() {
 
   const state = loadState();
   const currentStart = state?.settings?.payroll_week_start || 'sunday';
+  const settingsButtons = access.settings.write
+    ? '<button data-set-payroll-week="sunday">Week starts Sunday</button><button data-set-payroll-week="monday">Week starts Monday</button>'
+    : '';
 
   panel.insertAdjacentHTML('beforeend', `
     <hr />
     <h3>Payroll</h3>
     <p>Payroll week starts on: <strong>${currentStart === 'monday' ? 'Monday' : 'Sunday'}</strong></p>
     <div class="actions" data-payroll-settings>
-      <button data-set-payroll-week="sunday">Week starts Sunday</button>
-      <button data-set-payroll-week="monday">Week starts Monday</button>
+      ${settingsButtons}
       <button data-export-payroll="current">Export Current Period CSV</button>
       <button data-export-payroll="previous">Export Previous Period CSV</button>
     </div>
@@ -156,6 +165,7 @@ function ensurePayrollSettingsButton() {
 
   panel.querySelectorAll('[data-set-payroll-week]').forEach((button) => {
     button.addEventListener('click', async () => {
+      if (!permissions().settings.write) return;
       const nextState = loadState();
       if (!nextState) return;
       await updatePayrollWeekStart(button.dataset.setPayrollWeek);

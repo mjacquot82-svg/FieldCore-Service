@@ -2,6 +2,8 @@ import { listCustomers } from './data/repositories/customerRepository.js';
 import { listInvoices, listOpenInvoices } from './data/repositories/invoiceRepository.js';
 import { listPayments } from './data/repositories/paymentRepository.js';
 import { listProperties, listVisits } from './data/repositories/visitReadRepository.js';
+import { getSession } from './role-pin-login.js';
+import { getUiPermissions } from './services/uiPermissionService.js';
 
 const currency = (amount) => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -152,7 +154,7 @@ function renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId, 
   `;
 }
 
-function renderInvoicePreview(invoice, customerMap, propertyMap, visits, paymentTotals = {}) {
+function renderInvoicePreview(invoice, customerMap, propertyMap, visits, paymentTotals = {}, permissions = {}) {
   if (!invoice) {
     return `
       <aside class="panel invoice-preview-panel">
@@ -195,8 +197,8 @@ function renderInvoicePreview(invoice, customerMap, propertyMap, visits, payment
       ${renderServiceDetails(invoice, invoiceVisits, propertyMap)}
 
       <div class="actions invoice-actions invoice-preview-actions">
-        <button type="button" data-invoice-payment>Record payment</button>
-        <button type="button" data-invoice-print>Print / Save PDF</button>
+        ${permissions?.financials?.recordPayments ? '<button type="button" data-invoice-payment>Record payment</button>' : ''}
+        ${permissions?.financials?.exportInvoices ? '<button type="button" data-invoice-print>Print / Save PDF</button>' : ''}
       </div>
       <p class="invoice-next-action"><strong>V1 note:</strong> sending is not connected yet. Print or save as PDF for now.</p>
     </aside>
@@ -211,6 +213,8 @@ function getSelectedInvoiceId(invoices) {
 }
 
 function enhanceInvoicesView() {
+  const permissions = getUiPermissions(getSession());
+  if (!permissions.financials.read) return;
   const section = Array.from(document.querySelectorAll('main.content section')).find((candidate) =>
     candidate.querySelector('h2')?.textContent?.trim() === 'Invoices'
   );
@@ -257,14 +261,14 @@ function enhanceInvoicesView() {
           ${invoices.length ? invoices.map((invoice) => renderInvoiceListCard(invoice, customerMap, visits, selectedInvoiceId, paymentTotals)).join('') : '<p>No invoices found yet.</p>'}
         </div>
       </div>
-      ${renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits, paymentTotals)}
+      ${renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits, paymentTotals, permissions)}
     </div>
   `;
 
-  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals);
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals, permissions);
 }
 
-function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customerMap, propertyMap, visits, paymentTotals) {
+function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customerMap, propertyMap, visits, paymentTotals, permissions) {
   const list = section.querySelector('.invoice-list-stack');
   const preview = section.querySelector('.invoice-preview-panel');
   const selectedInvoice = invoices.find((invoice) => invoice.invoice_id === selectedInvoiceId);
@@ -274,31 +278,37 @@ function rerenderInvoiceWorkspace(section, selectedInvoiceId, invoices, customer
   }
 
   if (preview) {
-    preview.outerHTML = renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits, paymentTotals);
+    preview.outerHTML = renderInvoicePreview(selectedInvoice, customerMap, propertyMap, visits, paymentTotals, permissions);
   }
 
-  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals);
+  bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals, permissions);
 }
 
-function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals) {
+function bindInvoiceWorkspace(section, invoices, customerMap, propertyMap, visits, paymentTotals, permissions) {
   section.querySelectorAll('[data-select-invoice]').forEach((button) => {
     if (button.dataset.bound === 'true') return;
     button.dataset.bound = 'true';
     button.addEventListener('click', () => {
-      rerenderInvoiceWorkspace(section, button.dataset.selectInvoice, invoices, customerMap, propertyMap, visits, paymentTotals);
+      rerenderInvoiceWorkspace(section, button.dataset.selectInvoice, invoices, customerMap, propertyMap, visits, paymentTotals, permissions);
     });
   });
 
   section.querySelectorAll('[data-invoice-payment]').forEach((button) => {
     if (button.dataset.bound === 'true') return;
     button.dataset.bound = 'true';
-    button.addEventListener('click', () => document.querySelector('[data-nav="payments"]')?.click());
+    button.addEventListener('click', () => {
+      if (!permissions?.financials?.recordPayments) return;
+      document.querySelector('[data-nav="payments"]')?.click();
+    });
   });
 
   section.querySelectorAll('[data-invoice-print]').forEach((button) => {
     if (button.dataset.bound === 'true') return;
     button.dataset.bound = 'true';
-    button.addEventListener('click', () => window.print());
+    button.addEventListener('click', () => {
+      if (!permissions?.financials?.exportInvoices) return;
+      window.print();
+    });
   });
 }
 

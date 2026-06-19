@@ -1,6 +1,7 @@
 import { listCustomers } from './data/repositories/customerRepository.js';
 import { listOpenInvoices } from './data/repositories/invoiceRepository.js';
 import { readState } from './data/storage/local-state-adapter.js';
+import { getUiPermissions } from './services/uiPermissionService.js';
 
 const SESSION_KEY = 'fieldcore_current_session_v1';
 const AR_DASHBOARD_ID = 'ar-dashboard';
@@ -19,7 +20,15 @@ function getSession() {
 }
 
 function isWorkerSession() {
-  return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
+  return getUiPermissions(getSession()).isEmployee;
+}
+
+function canReadFinancials() {
+  return Boolean(getUiPermissions(getSession()).financials.read);
+}
+
+function canRecordPayments() {
+  return Boolean(getUiPermissions(getSession()).financials.recordPayments);
 }
 
 function customerMap(customers) {
@@ -141,7 +150,7 @@ function summarizeCustomers(openInvoices, customers) {
 }
 
 function addArDashboardNav() {
-  if (isWorkerSession()) {
+  if (isWorkerSession() || !canReadFinancials()) {
     document.querySelectorAll(`[data-enhanced-nav="${AR_DASHBOARD_ID}"]`).forEach((button) => button.remove());
     return;
   }
@@ -209,7 +218,7 @@ function renderCustomerCollectionRow(customer) {
       </div>
       <div class="actions">
         <button type="button" data-ar-open-invoices>Open Invoices</button>
-        <button type="button" data-ar-record-payment>Record Payment</button>
+        ${canRecordPayments() ? '<button type="button" data-ar-record-payment>Record Payment</button>' : ''}
       </div>
     </article>
   `;
@@ -232,7 +241,7 @@ function renderInvoiceRiskRow(invoice, customers) {
 function renderArDashboard() {
   const state = readState();
   const main = document.querySelector('main.content');
-  if (!state || !main) return;
+  if (!state || !main || !canReadFinancials()) return;
 
   const customers = customerMap(listCustomers());
   const openInvoices = getOpenInvoices(state);
@@ -255,7 +264,7 @@ function renderArDashboard() {
         </div>
         <div class="actions">
           <button type="button" data-ar-open-invoices>Open Invoices</button>
-          <button type="button" data-ar-record-payment>Record Payment</button>
+          ${canRecordPayments() ? '<button type="button" data-ar-record-payment>Record Payment</button>' : ''}
         </div>
       </div>
 
@@ -319,12 +328,16 @@ function setActiveArButton() {
 }
 
 function bindArDashboardActions() {
+  if (!canReadFinancials()) return;
   document.querySelectorAll('[data-ar-open-invoices]').forEach((button) => {
     button.addEventListener('click', () => document.querySelector('[data-nav="invoices"]')?.click());
   });
 
   document.querySelectorAll('[data-ar-record-payment]').forEach((button) => {
-    button.addEventListener('click', () => document.querySelector('[data-nav="payments"]')?.click());
+    button.addEventListener('click', () => {
+      if (!canRecordPayments()) return;
+      document.querySelector('[data-nav="payments"]')?.click();
+    });
   });
 }
 
@@ -333,7 +346,7 @@ document.addEventListener('click', (event) => {
   if (!arButton) return;
 
   event.preventDefault();
-  if (isWorkerSession()) return;
+  if (isWorkerSession() || !canReadFinancials()) return;
   setActiveArButton();
   renderArDashboard();
 });

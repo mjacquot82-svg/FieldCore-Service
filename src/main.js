@@ -44,6 +44,13 @@ import {
 } from './data/appMode.js';
 import { validateRepositoryAuthContext } from './data/repositoryContext.js';
 import { syncFoundationFromSupabase } from './data/supabaseFoundation.js';
+import {
+  allowedNavItems,
+  canAccessView,
+  getDefaultView,
+  getRestrictedViewReason,
+  getUiPermissions
+} from './services/uiPermissionService.js';
 
 const app = document.querySelector('#app');
 let state = isProductionMode() ? {} : loadState();
@@ -59,6 +66,7 @@ let billingSelectedVisitIds = new Set();
 let billingDateFilter = 'all';
 let billingSortOrder = 'newest';
 let productionModeBlockedReason = '';
+let productionAuthDiagnostics = null;
 
 const ALL_NAV_ITEMS = [
   ['dashboard', 'Dashboard'],
@@ -73,7 +81,6 @@ const ALL_NAV_ITEMS = [
 ];
 
 const WORKER_NAV_ITEMS = [['worker-route', 'My Route']];
-const WORKER_ROLES = new Set(['employee', 'worker']);
 const ADMIN_VIEWS = new Set([
   'dashboard',
   'today-route',
@@ -90,7 +97,7 @@ const ADMIN_VIEWS = new Set([
 ]);
 
 function isWorkerSession(session) {
-  return WORKER_ROLES.has(String(session?.role || '').toLowerCase());
+  return getUiPermissions(session).isEmployee;
 }
 
 function isAdminView(view) {
@@ -98,8 +105,7 @@ function isAdminView(view) {
 }
 
 function getNavItems(session) {
-  if (isWorkerSession(session)) return WORKER_NAV_ITEMS;
-  return ALL_NAV_ITEMS;
+  return allowedNavItems(isWorkerSession(session) ? WORKER_NAV_ITEMS : ALL_NAV_ITEMS, session);
 }
 
 
@@ -245,8 +251,17 @@ function renderOverdueVisitBanner(propertyMap, customerMap) {
 }
 
 function renderPropertyQuickActionCards(properties, customerMap) {
+  const permissions = getUiPermissions(currentSession);
   if (!properties.length) return '<article class="panel"><p>No service locations found for this customer.</p></article>';
-  return properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p><div class="actions"><button data-service-schedule="${p.property_id}">Schedule Visit</button><button data-service-pause="${p.property_id}">Pause Service</button><button data-service-frequency="${p.property_id}">Change Frequency</button><button data-service-price="${p.property_id}">Adjust Price</button></div></article>`).join('');
+  return properties.map((p) => {
+    const actions = [
+      permissions.visits.create ? `<button data-service-schedule="${p.property_id}">Schedule Visit</button>` : '',
+      permissions.properties.update ? `<button data-service-pause="${p.property_id}">Pause Service</button>` : '',
+      permissions.properties.update ? `<button data-service-frequency="${p.property_id}">Change Frequency</button>` : '',
+      permissions.properties.update ? `<button data-service-price="${p.property_id}">Adjust Price</button>` : ''
+    ].filter(Boolean).join('');
+    return `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
+  }).join('');
 }
 
 async function render() {
@@ -256,15 +271,23 @@ async function render() {
   }
 
   currentSession = getSession();
+  if (isProductionMode() && currentSession && productionAuthDiagnostics?.ready) {
+    currentSession = {
+      ...currentSession,
+      auth_user_id: productionAuthDiagnostics.userId || currentSession.auth_user_id || null,
+      membership_id: productionAuthDiagnostics.membershipId || currentSession.membership_id || null,
+      membership_role: productionAuthDiagnostics.role || currentSession.membership_role || null,
+      company_id: productionAuthDiagnostics.companyId || currentSession.company_id || null,
+      employee_id: productionAuthDiagnostics.employeeId || currentSession.employee_id || null
+    };
+  }
   if (!currentSession) {
     renderLogin();
     return;
   }
 
-  if (isWorkerSession(currentSession)) {
-    activeView = 'worker-route';
-  } else if (activeView === 'worker-route') {
-    activeView = 'dashboard';
+  if (!canAccessView(activeView, currentSession)) {
+    activeView = getDefaultView(currentSession);
   }
 
   if (activeView === 'today-route' && !showOverdueRoute) {
@@ -296,11 +319,12 @@ function renderProductionModeBlocker(reason) {
 }
 
 function renderView(view, metrics, customerMap, propertyMap) {
+  if (!canAccessView(view, currentSession)) return renderRestrictedView(view);
   if (isWorkerSession(currentSession) && isAdminView(view)) return renderWorkerRoute(currentSession);
   if (view === 'dashboard') return renderDashboard(metrics);
   if (view === 'worker-route') return renderWorkerRoute(currentSession);
-  if (view === 'route-builder') return renderRouteBuilder(state, selectedRouteBuilderDate);
-  if (view === 'employees') return renderEmployees();
+  if (view === 'route-builder') return renderRouteBuilder(state, selectedRouteBuilderDate, getUiPermissions(currentSession));
+  if (view === 'employees') return renderEmployees(getUiPermissions(currentSession));
   if (view === 'customers') return renderCustomers();
   if (view === 'timeline') return renderTimeline(customerMap, propertyMap);
   if (view === 'properties') return renderProperties(customerMap);
@@ -312,45 +336,74 @@ function renderView(view, metrics, customerMap, propertyMap) {
   return renderSettings();
 }
 
+function renderRestrictedView(view) {
+  return `<section><h2>Access Restricted</h2><article class="panel"><p>${getRestrictedViewReason(view, currentSession)}</p><button class="primary" data-nav="${getDefaultView(currentSession)}">Return to allowed view</button></article></section>`;
+}
+
 function renderDashboard(metrics) {
-  return `<section><h2>Operations Dashboard</h2></section><section class="panel"><h3>Today’s Priorities</h3><ul><li>${metrics.todayScheduledVisits} visits scheduled</li><li>${metrics.overdueInvoices} invoices overdue</li><li>${metrics.readyToBillVisits} visits ready to bill</li></ul></section><section class="panel"><h3>Today’s Visits</h3><div class="overview-cards">${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}</div></section><section class="panel"><h3>Billing Queue</h3><div class="overview-cards">${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}</div></section><section class="panel"><h3>Financial Snapshot</h3><div class="overview-cards">${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}${metricCard('Overdue Amount', currency(metrics.overdueAmount))}${metricCard('Paid This Month', currency(metrics.paidThisMonth))}</div></section>`;
+  const permissions = getUiPermissions(currentSession);
+  const billingPanel = permissions.financials.read ? `<section class="panel"><h3>Billing Queue</h3><div class="overview-cards">${metricCard('Ready-to-Bill Visits', metrics.readyToBillVisits)}${metricCard('Ready-to-Bill Amount', currency(metrics.readyToBillAmount))}</div></section>` : '';
+  const financialPanel = permissions.financials.read ? `<section class="panel"><h3>Financial Snapshot</h3><div class="overview-cards">${metricCard('Total Outstanding', currency(metrics.totalOutstanding))}${metricCard('Overdue Amount', currency(metrics.overdueAmount))}${metricCard('Paid This Month', currency(metrics.paidThisMonth))}</div></section>` : '';
+  return `<section><h2>Operations Dashboard</h2></section><section class="panel"><h3>Today’s Priorities</h3><ul><li>${metrics.todayScheduledVisits} visits scheduled</li>${permissions.financials.read ? `<li>${metrics.overdueInvoices} invoices overdue</li><li>${metrics.readyToBillVisits} visits ready to bill</li>` : ''}</ul></section><section class="panel"><h3>Today’s Visits</h3><div class="overview-cards">${metricCard('Today Scheduled Visits', metrics.todayScheduledVisits)}${metricCard('Today Completed Visits', metrics.todayCompletedVisits)}${metricCard('Today Skipped Visits', metrics.todaySkippedVisits)}</div></section>${billingPanel}${financialPanel}`;
 }
 
 function renderCustomers() {
+  const permissions = getUiPermissions(currentSession);
   const customers = getFilteredCustomers();
-  return `<section><h2>Customers</h2>${renderCustomerForm()}${renderCustomerLetterFilter()}<div class="stack">${customers.length ? customers.map((c) => {
+  return `<section><h2>Customers</h2>${permissions.customers.create ? renderCustomerForm() : ''}${renderCustomerLetterFilter()}<div class="stack">${customers.length ? customers.map((c) => {
     const balance = getCustomerBalance(c.customer_id);
     const summary = getCustomerSummary(c.customer_id);
     const paidUp = balance.outstanding <= 0;
     const overdue = balance.overdue > 0;
-    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone || 'No phone'} · ${c.email || 'No email'}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address || 'No billing address'}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Activity</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions"><button data-ledger="${c.customer_id}">View Ledger</button><button data-customer-nav="properties:${c.customer_id}">Manage Services</button><button data-customer-nav="timeline:${c.customer_id}">Customer Activity</button><button data-customer-edit="${c.customer_id}">Edit Customer</button><button data-customer-remove="${c.customer_id}">Remove Customer</button></div></article>`;
+    const actions = [
+      permissions.customers.ledger ? `<button data-ledger="${c.customer_id}">View Ledger</button>` : '',
+      permissions.properties.read ? `<button data-customer-nav="properties:${c.customer_id}">Manage Services</button>` : '',
+      `<button data-customer-nav="timeline:${c.customer_id}">Customer Activity</button>`,
+      permissions.customers.update ? `<button data-customer-edit="${c.customer_id}">Edit Customer</button>` : '',
+      permissions.customers.deactivate ? `<button data-customer-remove="${c.customer_id}">Remove Customer</button>` : ''
+    ].filter(Boolean).join('');
+    return `<article class="panel customer-card"><div class="customer-card-header"><div><h3>${c.name}</h3><p>${c.phone || 'No phone'} · ${c.email || 'No email'}</p></div><span class="badge ${c.status === 'active' ? 'paid-up' : 'outstanding'}">${c.status}</span></div><p>${c.billing_address || 'No billing address'}</p><div class="customer-overview"><div><span>Properties</span><strong>${summary.propertyCount}</strong></div><div><span>Active Services</span><strong>${summary.activeRecurringServices}</strong></div><div><span>Last Activity</span><strong>${summary.lastVisitDate}</strong></div></div><div class="balance-badges">${paidUp ? '<span class="badge paid-up">Paid up</span>' : `<span class="badge outstanding">Outstanding: ${currency(balance.outstanding)}</span>`}${overdue ? `<span class="badge overdue">Overdue: ${currency(balance.overdue)}</span>` : ''}</div><div class="actions">${actions}</div></article>`;
   }).join('') : '<article class="panel"><p>No customers found for this letter.</p></article>'}</div></section>`;
 }
 
 function renderTimeline(customerMap, propertyMap) {
+  const permissions = getUiPermissions(currentSession);
   const customer = selectedCustomer();
   const properties = customer ? customerProperties(customer.customer_id) : [];
   const events = customer ? buildCustomerTimeline(customer.customer_id, customerMap, propertyMap) : [];
-  const quickActions = customer ? `<div class="actions" style="margin: 0.75rem 0;"><button data-customer-nav="properties:${customer.customer_id}">+ Add Service</button><button data-customer-nav="properties:${customer.customer_id}">+ Schedule Visit</button><button data-nav="batch">Create Invoice</button><button data-nav="payments">Record Payment</button></div>` : '';
+  const quickActions = customer ? `<div class="actions" style="margin: 0.75rem 0;">${[
+    permissions.properties.create ? `<button data-customer-nav="properties:${customer.customer_id}">+ Add Service</button>` : '',
+    permissions.visits.create ? `<button data-customer-nav="properties:${customer.customer_id}">+ Schedule Visit</button>` : '',
+    permissions.financials.createInvoices ? '<button data-nav="batch">Create Invoice</button>' : '',
+    permissions.financials.recordPayments ? '<button data-nav="payments">Record Payment</button>' : ''
+  ].filter(Boolean).join('')}</div>` : '';
   const serviceLocationCards = customer ? `<h3>Service Locations</h3><div class="stack">${renderPropertyQuickActionCards(properties, customerMap)}</div>` : '';
   return `<section><h2>${customer ? `${customer.name} Customer Activity` : 'Customer Activity'}</h2><button class="primary" data-nav="customers">Back to Customers</button>${quickActions}${serviceLocationCards}<h3>Activity Timeline</h3><div class="stack timeline-stack">${events.length ? events.map((event) => `<article class="panel timeline-event"><div class="timeline-date">${event.date}</div><div><span class="badge outstanding">${event.type}</span><h3>${event.title}</h3><p>${event.detail}</p></div></article>`).join('') : '<article class="panel"><p>No customer activity found yet.</p></article>'}</div></section>`;
 }
 
 function renderProperties(customerMap) {
+  const permissions = getUiPermissions(currentSession);
   const customer = selectedCustomer();
   const properties = selectedCustomerId ? customerProperties(selectedCustomerId) : state.properties;
-  const serviceForms = customer ? `<div class="service-layout"><form id="service-form" class="panel service-form"><h3>Add Recurring Service or Service Location</h3><label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label><label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label><label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label><label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label><button class="primary" type="submit">Add Service</button></form><form id="one-off-form" class="panel service-form"><h3>Schedule One-Off Job</h3>${properties.length ? `<label>Service Location<select name="property_id" required>${properties.map((p) => `<option value="${p.property_id}">${p.service_address}</option>`).join('')}</select></label>` : '<p>Add a service location before scheduling a one-off job.</p>'}<label>Job Date<input name="visit_date" type="date" required /></label><label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label><label>Price<input name="price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label><button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button></form></div>` : '';
-  return `<section><h2>${customer ? `${customer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${customer ? `<div class="actions"><button data-service-edit="${p.property_id}">Change Service</button><button data-service-remove="${p.property_id}">Remove Service</button></div>` : ''}</article>`).join('') : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
+  const serviceForms = customer && (permissions.properties.create || permissions.visits.create) ? `<div class="service-layout">${permissions.properties.create ? `<form id="service-form" class="panel service-form"><h3>Add Recurring Service or Service Location</h3><label>Service Location<input name="service_address" placeholder="123 Main St or Backyard" required /></label><label>Service Type<input name="service_type" placeholder="Mowing, Garden Care, Snow Removal" required /></label><label>Frequency<select name="recurring_frequency" required><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option><option value="one-time">One-time / odd job location</option></select></label><label>Default Price<input name="default_price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Gate code, preferred day, service notes" /></label><button class="primary" type="submit">Add Service</button></form>` : ''}${permissions.visits.create ? `<form id="one-off-form" class="panel service-form"><h3>Schedule One-Off Job</h3>${properties.length ? `<label>Service Location<select name="property_id" required>${properties.map((p) => `<option value="${p.property_id}">${p.service_address}</option>`).join('')}</select></label>` : '<p>Add a service location before scheduling a one-off job.</p>'}<label>Job Date<input name="visit_date" type="date" required /></label><label>Job Description<input name="service_description" placeholder="Mulch install, weeding, cleanup" required /></label><label>Price<input name="price" type="number" min="0" step="0.01" required /></label><label>Notes<input name="notes" placeholder="Materials, access notes, special instructions" /></label><button class="primary" type="submit" ${properties.length ? '' : 'disabled'}>Schedule One-Off Job</button></form>` : ''}</div>` : '';
+  return `<section><h2>${customer ? `${customer.name} Services / Service Locations` : 'Properties / Service Locations'}</h2>${customer ? '<button class="primary" data-nav="customers">Back to Customers</button>' : ''}${serviceForms}<div class="stack">${properties.length ? properties.map((p) => {
+    const actions = customer ? [
+      permissions.properties.update ? `<button data-service-edit="${p.property_id}">Change Service</button>` : '',
+      permissions.properties.deactivate ? `<button data-service-remove="${p.property_id}">Remove Service</button>` : ''
+    ].filter(Boolean).join('') : '';
+    return `<article class="panel"><div class="customer-card-header"><div><h3>${p.service_address}</h3><p>${customerMap[p.customer_id]?.name ?? 'Unknown Customer'}</p></div><span class="badge ${p.status === 'active' ? 'paid-up' : 'outstanding'}">${p.status}</span></div><p>${p.service_type} · ${p.recurring_frequency}</p>${renderVisitStatusLine(p.property_id)}<p>Default Price: ${currency(p.default_price)}</p><p>Notes: ${p.notes || 'None'}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</article>`;
+  }).join('') : '<article class="panel"><p>No properties found for this customer.</p></article>'}</div></section>`;
 }
 
 function renderTodayRoute(customerMap, propertyMap) {
+  const permissions = getUiPermissions(currentSession);
   const routeVisits = showOverdueRoute ? getOverdueScheduledVisits() : state.visits.filter((v) => v.visit_date === selectedRouteDate);
   const heading = showOverdueRoute ? 'Overdue Visits' : 'Today’s Route / Daily Work List';
   const emptyText = showOverdueRoute ? 'No overdue visits found.' : 'No visits found for this date.';
   const dateControl = showOverdueRoute
     ? '<div class="panel"><p>Showing scheduled visits older than today.</p><button data-clear-overdue-route>Back to selected date</button></div>'
     : `<div class="panel"><label>Select Date<input type="date" id="route-date" value="${selectedRouteDate}" /></label></div>`;
-  return `<section><h2>${heading}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Visit date ${v.visit_date}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p><div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div></article>`; }).join('') : `<article class="panel"><p>${emptyText}</p></article>`}</div></section>`;
+  return `<section><h2>${heading}</h2>${dateControl}<div class="stack">${routeVisits.length ? routeVisits.map((v) => { const property = propertyMap[v.property_id]; const customer = customerMap[property?.customer_id]; const actions = permissions.visits.updateCompanyWide ? `<div class="actions"><button data-visit-action="${v.visit_id}:complete">Mark Completed</button><button data-visit-action="${v.visit_id}:skip">Mark Skipped</button><button data-visit-action="${v.visit_id}:skip-reschedule">Skip + Reschedule</button></div>` : ''; return `<article class="panel"><h3>${customer?.name ?? 'Unknown Customer'}</h3><p>${property?.service_address ?? 'Unknown address'}</p><p>${v.service_description}</p><p>${property?.service_type ?? 'Service'} · ${property?.recurring_frequency ?? 'n/a'}</p><p>Visit date ${v.visit_date}</p><p>Price ${currency(v.price)}</p><p>Notes: ${v.notes || 'None'}</p><p>Status: ${v.status}</p>${actions}</article>`; }).join('') : `<article class="panel"><p>${emptyText}</p></article>`}</div></section>`;
 }
 
 function renderSessionBanner(session) {
@@ -365,6 +418,7 @@ function renderSessionBanner(session) {
 }
 
 function renderWorkerStop(visit, customers, properties, index) {
+  const permissions = getUiPermissions(currentSession);
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const serviceText = visit.service_description || property?.service_type || 'Service';
@@ -372,11 +426,11 @@ function renderWorkerStop(visit, customers, properties, index) {
   const statusClass = visit.status === 'completed' ? 'completed' : visit.status === 'skipped' ? 'skipped' : visit.status === 'in-progress' ? 'current' : '';
   const actions = [];
 
-  if (visit.status === 'scheduled') {
+  if (permissions.visits.updateAssignedLifecycle && visit.status === 'scheduled') {
     actions.push(`<button type="button" data-worker-action="${visit.visit_id}:start">Start Stop</button>`);
     actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
     actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
-  } else if (visit.status === 'in-progress') {
+  } else if (permissions.visits.updateAssignedLifecycle && visit.status === 'in-progress') {
     actions.push(`<button type="button" data-worker-action="${visit.visit_id}:complete">Complete Stop</button>`);
     actions.push(`<button type="button" data-worker-action="${visit.visit_id}:skip">Skip Stop</button>`);
   }
@@ -634,13 +688,15 @@ function renderInvoices(customerMap) {
 }
 
 function renderPayments(customerMap) {
+  const permissions = getUiPermissions(currentSession);
   const invoices = state.invoices.filter((i) => i.payment_status !== 'paid');
   const overdue = invoices.filter((i) => i.payment_status === 'overdue');
-  return `<section><h2>Payments / Outstanding Tracking</h2><p>Outstanding Balance: <strong>${currency(computeDashboard(state).totalOutstanding)}</strong></p><h3>Unpaid Invoices</h3><div class="stack">${invoices.map((i) => `<article class="panel"><h4>${i.invoice_number} · ${customerMap[i.customer_id]?.name ?? i.customer_name}</h4><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p><div class="actions"><button data-pay="${i.invoice_id}:partial">Mark Partial</button><button data-pay="${i.invoice_id}:paid">Mark Paid</button></div></article>`).join('')}</div><h3>Overdue Invoices</h3><ul>${overdue.map((i) => `<li>${i.invoice_number} - ${currency(i.total - (i.amount_paid || 0))}</li>`).join('')}</ul></section>`;
+  return `<section><h2>Payments / Outstanding Tracking</h2><p>Outstanding Balance: <strong>${currency(computeDashboard(state).totalOutstanding)}</strong></p><h3>Unpaid Invoices</h3><div class="stack">${invoices.map((i) => `<article class="panel"><h4>${i.invoice_number} · ${customerMap[i.customer_id]?.name ?? i.customer_name}</h4><p>Total ${currency(i.total)} · Paid ${currency(i.amount_paid || 0)}</p>${permissions.financials.recordPayments ? `<div class="actions"><button data-pay="${i.invoice_id}:partial">Mark Partial</button><button data-pay="${i.invoice_id}:paid">Mark Paid</button></div>` : ''}</article>`).join('')}</div><h3>Overdue Invoices</h3><ul>${overdue.map((i) => `<li>${i.invoice_number} - ${currency(i.total - (i.amount_paid || 0))}</li>`).join('')}</ul></section>`;
 }
 
 function renderSettings() {
-  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${state.company.name}</p><p>Company ID: ${state.company.company_id}</p><p>Invoice Prefix: ${state.settings.invoice_prefix}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p><button id="reset-seed">Reset Demo Data</button></article></section>`;
+  const permissions = getUiPermissions(currentSession);
+  return `<section><h2>Settings</h2><article class="panel"><p>Company: ${state.company.name}</p><p>Company ID: ${state.company.company_id}</p><p>Invoice Prefix: ${state.settings.invoice_prefix}</p><p>Tax Rate: ${(state.settings.tax_rate * 100).toFixed(1)}%</p>${permissions.settings.resetDemoData ? '<button id="reset-seed">Reset Demo Data</button>' : ''}</article></section>`;
 }
 
 function metricCard(label, value) {
@@ -652,14 +708,25 @@ function reloadStateAndRender() {
   render();
 }
 
+function denyUiAction(message = 'You do not have permission for that action.') {
+  flashMessage = message;
+  render();
+  return false;
+}
+
+function showOperationError(error) {
+  flashMessage = error?.message || 'Operation failed.';
+  render();
+}
+
 function bindEvents() {
   app.querySelectorAll('[data-nav]').forEach((button) => button.addEventListener('click', () => {
     const nextView = button.dataset.nav;
-    if (isWorkerSession(currentSession) && nextView !== 'worker-route') {
-      activeView = 'worker-route';
+    if (!canAccessView(nextView, currentSession)) {
+      activeView = getDefaultView(currentSession);
       selectedCustomerId = '';
       showOverdueRoute = false;
-      flashMessage = '';
+      flashMessage = getRestrictedViewReason(nextView, currentSession);
       render();
       return;
     }
@@ -673,15 +740,15 @@ function bindEvents() {
   app.querySelectorAll('[data-clear-overdue-route]').forEach((button) => button.addEventListener('click', () => { showOverdueRoute = false; flashMessage = ''; render(); }));
   app.querySelectorAll('[data-letter-filter]').forEach((button) => button.addEventListener('click', () => { selectedCustomerLetter = button.dataset.letterFilter; render(); }));
   app.querySelectorAll('[data-customer-nav]').forEach((button) => button.addEventListener('click', () => {
-    if (isWorkerSession(currentSession)) {
-      activeView = 'worker-route';
+    const [view, customerId] = button.dataset.customerNav.split(':');
+    if (!canAccessView(view, currentSession)) {
+      activeView = getDefaultView(currentSession);
       selectedCustomerId = '';
       showOverdueRoute = false;
-      flashMessage = '';
+      flashMessage = getRestrictedViewReason(view, currentSession);
       render();
       return;
     }
-    const [view, customerId] = button.dataset.customerNav.split(':');
     activeView = view;
     selectedCustomerId = customerId;
     showOverdueRoute = false;
@@ -689,21 +756,21 @@ function bindEvents() {
     render();
   }));
   const customerForm = app.querySelector('#customer-form');
-  if (customerForm) customerForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(customerForm); const name = String(formData.get('name') || '').trim(); if (!name) return; await createCustomer({ name, phone: formData.get('phone') || '', email: formData.get('email') || '', billing_address: formData.get('billing_address') || '', preferred_service_day: formData.get('preferred_service_day') || undefined, status: 'active' }); selectedCustomerLetter = 'all'; state = loadState(); flashMessage = 'Customer added.'; render(); });
-  app.querySelectorAll('[data-customer-edit]').forEach((button) => button.addEventListener('click', async () => { const customerId = button.dataset.customerEdit; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; const name = window.prompt('Customer name:', customer.name); if (!name) return; const phone = window.prompt('Phone:', customer.phone || ''); if (phone === null) return; const email = window.prompt('Email:', customer.email || ''); if (email === null) return; const billingAddress = window.prompt('Billing address:', customer.billing_address || ''); if (billingAddress === null) return; const status = window.prompt('Status (active or inactive):', customer.status || 'active'); if (!status) return; await updateCustomer(customerId, { name, phone, email, billing_address: billingAddress, status }); state = loadState(); flashMessage = 'Customer updated.'; render(); }));
-  app.querySelectorAll('[data-customer-remove]').forEach((button) => button.addEventListener('click', async () => { const customerId = button.dataset.customerRemove; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; if (!window.confirm(`Remove ${customer.name}? This will mark the customer inactive and keep history.`)) return; await deactivateCustomerAndProperties(customerId); state = loadState(); flashMessage = 'Customer removed from active work.'; render(); }));
+  if (customerForm) customerForm.addEventListener('submit', async (event) => { event.preventDefault(); if (!getUiPermissions(currentSession).customers.create) return denyUiAction(); const formData = new FormData(customerForm); const name = String(formData.get('name') || '').trim(); if (!name) return; await createCustomer({ name, phone: formData.get('phone') || '', email: formData.get('email') || '', billing_address: formData.get('billing_address') || '', preferred_service_day: formData.get('preferred_service_day') || undefined, status: 'active' }); selectedCustomerLetter = 'all'; state = loadState(); flashMessage = 'Customer added.'; render(); });
+  app.querySelectorAll('[data-customer-edit]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).customers.update) return denyUiAction(); const customerId = button.dataset.customerEdit; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; const name = window.prompt('Customer name:', customer.name); if (!name) return; const phone = window.prompt('Phone:', customer.phone || ''); if (phone === null) return; const email = window.prompt('Email:', customer.email || ''); if (email === null) return; const billingAddress = window.prompt('Billing address:', customer.billing_address || ''); if (billingAddress === null) return; const status = window.prompt('Status (active or inactive):', customer.status || 'active'); if (!status) return; await updateCustomer(customerId, { name, phone, email, billing_address: billingAddress, status }); state = loadState(); flashMessage = 'Customer updated.'; render(); }));
+  app.querySelectorAll('[data-customer-remove]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).customers.deactivate) return denyUiAction(); const customerId = button.dataset.customerRemove; const customer = state.customers.find((c) => c.customer_id === customerId); if (!customer) return; if (!window.confirm(`Remove ${customer.name}? This will mark the customer inactive and keep history.`)) return; await deactivateCustomerAndProperties(customerId); state = loadState(); flashMessage = 'Customer removed from active work.'; render(); }));
   const serviceForm = app.querySelector('#service-form');
-  if (serviceForm && selectedCustomerId) serviceForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(serviceForm); await createProperty({ customer_id: selectedCustomerId, service_address: formData.get('service_address'), service_type: formData.get('service_type'), recurring_frequency: formData.get('recurring_frequency'), default_price: Number(formData.get('default_price') || 0), status: 'active', notes: formData.get('notes') || '' }); state = loadState(); flashMessage = 'Service added.'; render(); });
+  if (serviceForm && selectedCustomerId) serviceForm.addEventListener('submit', async (event) => { event.preventDefault(); if (!getUiPermissions(currentSession).properties.create) return denyUiAction(); const formData = new FormData(serviceForm); await createProperty({ customer_id: selectedCustomerId, service_address: formData.get('service_address'), service_type: formData.get('service_type'), recurring_frequency: formData.get('recurring_frequency'), default_price: Number(formData.get('default_price') || 0), status: 'active', notes: formData.get('notes') || '' }); state = loadState(); flashMessage = 'Service added.'; render(); });
   const oneOffForm = app.querySelector('#one-off-form');
-  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(oneOffForm); await scheduleOneOffVisit({ company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job' }); state = loadState(); flashMessage = 'One-off job scheduled.'; render(); });
-  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; await scheduleVisit({ company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes }); state = loadState(); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
-  app.querySelectorAll('[data-service-pause]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.servicePause; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Pause service at ${property.service_address}?`)) return; await pausePropertyService(propertyId); state = loadState(); flashMessage = 'Service paused.'; render(); }));
-  app.querySelectorAll('[data-service-frequency]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceFrequency; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; await updatePropertyFrequency(propertyId, frequency); state = loadState(); flashMessage = 'Service frequency updated.'; render(); }));
-  app.querySelectorAll('[data-service-price]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.servicePrice; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; await updatePropertyPrice(propertyId, Number(price || 0)); state = loadState(); flashMessage = 'Service price updated.'; render(); }));
-  app.querySelectorAll('[data-service-edit]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceEdit; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const serviceType = window.prompt('Service type:', property.service_type); if (!serviceType) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; const notes = window.prompt('Notes:', property.notes || ''); if (notes === null) return; const status = window.prompt('Status (active or inactive):', property.status || 'active'); if (!status) return; await updateProperty(propertyId, { service_type: serviceType, recurring_frequency: frequency, default_price: Number(price || 0), notes, status }); state = loadState(); flashMessage = 'Service updated.'; render(); }));
-  app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', async () => { const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; await removePropertyService(propertyId); state = loadState(); flashMessage = 'Service removed from active work.'; render(); }));
+  if (oneOffForm && selectedCustomerId) oneOffForm.addEventListener('submit', async (event) => { event.preventDefault(); if (!getUiPermissions(currentSession).visits.create) return denyUiAction(); const formData = new FormData(oneOffForm); await scheduleOneOffVisit({ company_id: state.company.company_id, property_id: formData.get('property_id'), visit_date: formData.get('visit_date'), service_description: formData.get('service_description'), price: Number(formData.get('price') || 0), status: 'scheduled', notes: formData.get('notes') || 'One-off job' }); state = loadState(); flashMessage = 'One-off job scheduled.'; render(); });
+  app.querySelectorAll('[data-service-schedule]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).visits.create) return denyUiAction(); const propertyId = button.dataset.serviceSchedule; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const visitDate = window.prompt('Schedule visit date (YYYY-MM-DD):', today()); if (!visitDate) return; const description = window.prompt('Visit description:', `${property.service_type} service`); if (!description) return; const price = window.prompt('Visit price:', property.default_price); if (price === null) return; const notes = window.prompt('Visit notes:', property.notes || ''); if (notes === null) return; await scheduleVisit({ company_id: state.company.company_id, property_id: property.property_id, visit_date: visitDate, service_description: description, price: Number(price || 0), status: 'scheduled', notes }); state = loadState(); flashMessage = `Visit scheduled for ${visitDate}.`; render(); }));
+  app.querySelectorAll('[data-service-pause]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).properties.update) return denyUiAction(); const propertyId = button.dataset.servicePause; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Pause service at ${property.service_address}?`)) return; await pausePropertyService(propertyId); state = loadState(); flashMessage = 'Service paused.'; render(); }));
+  app.querySelectorAll('[data-service-frequency]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).properties.update) return denyUiAction(); const propertyId = button.dataset.serviceFrequency; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; await updatePropertyFrequency(propertyId, frequency); state = loadState(); flashMessage = 'Service frequency updated.'; render(); }));
+  app.querySelectorAll('[data-service-price]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).properties.update) return denyUiAction(); const propertyId = button.dataset.servicePrice; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; await updatePropertyPrice(propertyId, Number(price || 0)); state = loadState(); flashMessage = 'Service price updated.'; render(); }));
+  app.querySelectorAll('[data-service-edit]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).properties.update) return denyUiAction(); const propertyId = button.dataset.serviceEdit; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; const serviceType = window.prompt('Service type:', property.service_type); if (!serviceType) return; const frequency = window.prompt('Frequency (weekly, biweekly, monthly, one-time):', property.recurring_frequency); if (!frequency) return; const price = window.prompt('Default price:', property.default_price); if (price === null) return; const notes = window.prompt('Notes:', property.notes || ''); if (notes === null) return; const status = window.prompt('Status (active or inactive):', property.status || 'active'); if (!status) return; await updateProperty(propertyId, { service_type: serviceType, recurring_frequency: frequency, default_price: Number(price || 0), notes, status }); state = loadState(); flashMessage = 'Service updated.'; render(); }));
+  app.querySelectorAll('[data-service-remove]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).properties.deactivate) return denyUiAction(); const propertyId = button.dataset.serviceRemove; const property = state.properties.find((p) => p.property_id === propertyId); if (!property) return; if (!window.confirm(`Remove ${property.service_type} at ${property.service_address}? This will mark the service inactive and keep history.`)) return; await removePropertyService(propertyId); state = loadState(); flashMessage = 'Service removed from active work.'; render(); }));
   const batchForm = app.querySelector('#batch-form');
-  if (batchForm) batchForm.addEventListener('submit', async (event) => { event.preventDefault(); const formData = new FormData(batchForm); const summary = await generateInvoicesForDateRange(formData.get('start'), formData.get('end'), { source: 'batch-form' }); state = loadState(); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
+  if (batchForm) batchForm.addEventListener('submit', async (event) => { event.preventDefault(); if (!getUiPermissions(currentSession).financials.createInvoices) return denyUiAction(); const formData = new FormData(batchForm); const summary = await generateInvoicesForDateRange(formData.get('start'), formData.get('end'), { source: 'batch-form' }); state = loadState(); flashMessage = `Generated ${summary.createdCount} invoices from ${summary.billedVisitCount} completed visits.`; activeView = 'invoices'; selectedCustomerId = ''; showOverdueRoute = false; render(); });
   app.querySelectorAll('[data-billing-visit]').forEach((checkbox) => checkbox.addEventListener('change', () => {
     if (checkbox.checked) billingSelectedVisitIds.add(checkbox.dataset.billingVisit);
     else billingSelectedVisitIds.delete(checkbox.dataset.billingVisit);
@@ -720,6 +787,7 @@ function bindEvents() {
   });
   const billingSelectAll = app.querySelector('[data-billing-select-all]');
   if (billingSelectAll) billingSelectAll.addEventListener('click', () => {
+    if (!getUiPermissions(currentSession).financials.createInvoices) return denyUiAction();
     const propertyMap = getPropertyMap(state);
     const visibleVisits = filterReadyToBillVisits(getReadyToBillVisits(), billingDateFilter);
     getBillableVisitIds(visibleVisits, propertyMap).forEach((visitId) => billingSelectedVisitIds.add(visitId));
@@ -727,11 +795,13 @@ function bindEvents() {
   });
   const billingClearAll = app.querySelector('[data-billing-clear-all]');
   if (billingClearAll) billingClearAll.addEventListener('click', () => {
+    if (!getUiPermissions(currentSession).financials.createInvoices) return denyUiAction();
     billingSelectedVisitIds = new Set();
     render();
   });
   const billingGenerate = app.querySelector('[data-billing-generate]');
   if (billingGenerate) billingGenerate.addEventListener('click', async () => {
+    if (!getUiPermissions(currentSession).financials.createInvoices) return denyUiAction();
     const summary = await generateInvoicesForVisits([...billingSelectedVisitIds], { source: 'ready-to-bill' });
     billingSelectedVisitIds = new Set();
     state = loadState();
@@ -741,16 +811,17 @@ function bindEvents() {
     showOverdueRoute = false;
     render();
   });
-  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', async () => { const [invoiceId, status] = button.dataset.pay.split(':'); await updateInvoicePaymentStatus(invoiceId, status, { source: 'payments-view' }); state = loadState(); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
+  app.querySelectorAll('[data-pay]').forEach((button) => button.addEventListener('click', async () => { if (!getUiPermissions(currentSession).financials.recordPayments) return denyUiAction(); const [invoiceId, status] = button.dataset.pay.split(':'); await updateInvoicePaymentStatus(invoiceId, status, { source: 'payments-view' }); state = loadState(); flashMessage = `Invoice ${invoiceId} marked as ${status}.`; render(); }));
   const routeDateInput = app.querySelector('#route-date');
   if (routeDateInput) routeDateInput.addEventListener('change', () => { selectedRouteDate = routeDateInput.value; showOverdueRoute = false; render(); });
   if (activeView === 'route-builder') {
-    bindRouteBuilderEvents(state, (date) => { selectedRouteBuilderDate = date; }, render);
+    bindRouteBuilderEvents(state, (date) => { selectedRouteBuilderDate = date; }, render, getUiPermissions(currentSession));
   }
   if (activeView === 'employees') {
-    bindEmployeeEvents(reloadStateAndRender);
+    bindEmployeeEvents(reloadStateAndRender, getUiPermissions(currentSession));
   }
   app.querySelectorAll('[data-worker-action]').forEach((button) => button.addEventListener('click', async () => {
+    if (!getUiPermissions(currentSession).visits.updateAssignedLifecycle) return denyUiAction();
     const [visitId, action] = button.dataset.workerAction.split(':');
     await updateWorkerVisitStatus(visitId, action);
     if (action === 'start') flashMessage = 'Stop started.';
@@ -770,13 +841,14 @@ function bindEvents() {
     render();
   });
   const resetButton = app.querySelector('#reset-seed');
-  if (resetButton) resetButton.addEventListener('click', () => { state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; selectedRouteBuilderDate = today(); showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
-  app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
+  if (resetButton) resetButton.addEventListener('click', () => { if (!getUiPermissions(currentSession).settings.resetDemoData) return denyUiAction(); state = resetSeed(); selectedRouteDate = today(); selectedCustomerId = ''; selectedCustomerLetter = 'all'; selectedRouteBuilderDate = today(); showOverdueRoute = false; flashMessage = 'Seed data restored.'; render(); });
+  app.querySelectorAll('[data-ledger]').forEach((button) => button.addEventListener('click', () => { if (!getUiPermissions(currentSession).customers.ledger) return denyUiAction(); flashMessage = `Ledger view for customer ${button.dataset.ledger} is available in the customer ledger workflow.`; render(); }));
 }
 
 async function initializeApp() {
   if (isProductionMode()) {
     const diagnostics = await validateRepositoryAuthContext();
+    productionAuthDiagnostics = diagnostics;
     const requirementMessage = getProductionModeRequirementMessage({
       ...diagnostics,
       supabaseConfigured: Boolean(diagnostics.transport?.configured)
@@ -810,6 +882,11 @@ async function initializeApp() {
   currentSession = getSession();
   await render();
 }
+
+window.addEventListener('unhandledrejection', (event) => {
+  event.preventDefault();
+  showOperationError(event.reason);
+});
 
 if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
 initializeApp();

@@ -20,7 +20,15 @@ function syncEmployeeView(render) {
   }
 }
 
-function employeeCard(employee) {
+function employeeCard(employee, permissions) {
+  const canWrite = Boolean(permissions?.employees?.update);
+  const canDelete = Boolean(permissions?.employees?.delete);
+  const actions = [
+    canWrite ? `<button data-employee-toggle="${employee.employee_id}">${employee.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>` : '',
+    canWrite ? `<button data-employee-pin="${employee.employee_id}">Change PIN</button>` : '',
+    canDelete ? `<button data-employee-delete="${employee.employee_id}">Delete</button>` : ''
+  ].filter(Boolean).join('');
+
   return `
     <article class="panel employee-card">
       <div class="customer-card-header">
@@ -30,25 +38,22 @@ function employeeCard(employee) {
         </div>
         <span class="badge ${employee.status === 'active' ? 'paid-up' : 'outstanding'}">${employee.status}</span>
       </div>
-      <div class="actions">
-        <button data-employee-toggle="${employee.employee_id}">${employee.status === 'active' ? 'Deactivate' : 'Reactivate'}</button>
-        <button data-employee-pin="${employee.employee_id}">Change PIN</button>
-        <button data-employee-delete="${employee.employee_id}">Delete</button>
-      </div>
+      ${actions ? `<div class="actions">${actions}</div>` : ''}
     </article>
   `;
 }
 
-export function renderEmployees() {
+export function renderEmployees(permissions = {}) {
   const state = loadState();
   if (!state) return '<section><p>Employees data not available.</p></section>';
 
   const employees = listEmployees();
+  const canCreate = Boolean(permissions?.employees?.create);
 
   return `
     <section>
       <h2>Employees</h2>
-      <form id="employee-form" class="panel service-form">
+      ${canCreate ? `<form id="employee-form" class="panel service-form">
         <h3>Add Employee</h3>
         <label>Name
           <input name="name" placeholder="Employee name" required />
@@ -63,22 +68,23 @@ export function renderEmployees() {
           <input name="pin" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="1234" required />
         </label>
         <button class="primary" type="submit">Add Employee</button>
-      </form>
+      </form>` : ''}
 
       <h3>Active Employees</h3>
       <div class="stack">
-        ${employees.length ? employees.map(employeeCard).join('') : '<article class="panel"><p>No employees added yet.</p></article>'}
+        ${employees.length ? employees.map((employee) => employeeCard(employee, permissions)).join('') : '<article class="panel"><p>No employees added yet.</p></article>'}
       </div>
     </section>
   `;
 }
 
-export function bindEmployeeEvents(render) {
+export function bindEmployeeEvents(render, permissions = {}) {
   const form = document.querySelector('#employee-form');
   if (form && form.dataset.employeeBound !== 'true') {
     form.dataset.employeeBound = 'true';
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (!permissions?.employees?.create) return;
       if (form.dataset.employeeSubmitting === 'true') return;
 
       const formData = new FormData(form);
@@ -114,6 +120,7 @@ export function bindEmployeeEvents(render) {
     button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
+      if (!permissions?.employees?.update) return;
 
       const employeeId = button.dataset.employeeToggle;
       await toggleEmployeeStatus(employeeId);
@@ -128,6 +135,7 @@ export function bindEmployeeEvents(render) {
     button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
+      if (!permissions?.employees?.update) return;
 
       const employeeId = button.dataset.employeePin;
       const nextPin = window.prompt('Enter new 4-digit PIN:');
@@ -149,6 +157,7 @@ export function bindEmployeeEvents(render) {
     button.addEventListener('click', async () => {
       const state = loadState();
       if (!state) return;
+      if (!permissions?.employees?.delete) return;
 
       const employeeId = button.dataset.employeeDelete;
       const employee = (state.employees || []).find((item) => item.employee_id === employeeId);

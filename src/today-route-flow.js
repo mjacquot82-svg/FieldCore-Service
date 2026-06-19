@@ -1,4 +1,5 @@
 import { completeVisit, skipAndRescheduleVisit as rescheduleVisit, skipVisit } from './services/visitLifecycleService.js';
+import { getUiPermissions } from './services/uiPermissionService.js';
 
 const STORAGE_KEY = 'servicebatch_invoice_mvp_v1';
 const SESSION_KEY = 'fieldcore_current_session_v1';
@@ -25,7 +26,11 @@ function getSession() {
 }
 
 function isWorkerSession() {
-  return ['employee', 'worker'].includes(String(getSession()?.role || '').toLowerCase());
+  return getUiPermissions(getSession()).isEmployee;
+}
+
+function permissions() {
+  return getUiPermissions(getSession());
 }
 
 function customerMap(state) {
@@ -122,6 +127,7 @@ function stopStateLabel(visit) {
 }
 
 function renderRouteStop(visit, index, customers, properties) {
+  const canUpdateVisits = permissions().visits.updateCompanyWide;
   const property = properties[visit.property_id];
   const customer = customers[property?.customer_id];
   const stateClass = stopStateClass(visit);
@@ -147,11 +153,11 @@ function renderRouteStop(visit, index, customers, properties) {
         <p class="route-stop-service">${serviceText}</p>
         <p class="route-stop-preferred">Preferred: ${preferredDay} ${preferredStatus}</p>
       </div>
-      <div class="actions route-stop-actions">
+      ${canUpdateVisits ? `<div class="actions route-stop-actions">
         <button type="button" data-flow-visit-action="${visit.visit_id}:complete">Mark Completed</button>
         <button type="button" data-flow-visit-action="${visit.visit_id}:skip">Mark Skipped</button>
         <button type="button" data-flow-visit-action="${visit.visit_id}:skip-reschedule">Skip + Reschedule</button>
-      </div>
+      </div>` : ''}
     </article>
   `;
 }
@@ -204,6 +210,7 @@ function enhanceTodayRoute(force = false) {
   const metrics = getRouteMetrics(visits, state);
   const routeGroups = groupVisitsByWorker(visits);
   const dateControl = section.querySelector('#route-date')?.closest('.panel')?.outerHTML || '';
+  const canCreateInvoices = permissions().financials.createInvoices;
 
   const healthIndicators = `
     <div class="route-health-indicators">
@@ -221,14 +228,14 @@ function enhanceTodayRoute(force = false) {
           <h2>${isOverdueView ? 'Overdue Visits' : 'Today’s Route'}</h2>
           <p>${isOverdueView ? 'Scheduled visits older than today.' : `Daily operations view for ${date}.`}</p>
         </div>
-        <div class="actions route-billing-cta">
+        ${canCreateInvoices ? `<div class="actions route-billing-cta">
           <div class="billing-summary">
             <span class="billing-label">Ready to Bill</span>
             <strong class="billing-value">${currency(metrics.readyToBillValue)}</strong>
           </div>
           ${metrics.readyToBillValue > 0 ? '<button type="button" class="primary" data-flow-create-invoices>Create invoices now</button>' : ''}
           <button type="button" data-flow-ready-to-bill>Open Billing Queue →</button>
-        </div>
+        </div>` : ''}
       </div>
       <div class="route-flow-stats">
         ${renderStat('Workers / Routes', Object.keys(routeGroups).length)}
@@ -279,7 +286,7 @@ async function skipAndRescheduleVisit(visitId) {
 }
 
 function goToReadyToBill() {
-  if (isWorkerSession()) return;
+  if (isWorkerSession() || !permissions().financials.createInvoices) return;
   document.querySelector('[data-nav="batch"]')?.click();
 }
 
@@ -308,6 +315,7 @@ async function handleFlowClick(event) {
 
   const [visitId, action] = button.dataset.flowVisitAction.split(':');
   if (!visitId || !action) return;
+  if (!permissions().visits.updateCompanyWide) return;
 
   if (action === 'complete') await completeRouteVisit(visitId);
   if (action === 'skip') await skipRouteVisit(visitId);
