@@ -1,7 +1,10 @@
 {
   "type": "module",
   "scripts": {
-    "test": "node tests/pilot-regression.test.mjs"
+    "test": "node tests/pilot-regression.test.mjs",
+    "test:e2e": "playwright test"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
+  }
 }
