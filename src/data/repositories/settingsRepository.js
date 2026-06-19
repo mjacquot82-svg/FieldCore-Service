@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
@@ -146,6 +147,8 @@ export async function syncSettingsFromSupabase() {
   const companyId = await resolveRepositoryCompanyId();
   const settings = await readSupabaseSettings(companyId);
   if (!settings) {
+    if (!canUseLocalPersistenceFallback()) return null;
+
     const local = localSettings();
     if (!local.company_id) return null;
 
@@ -162,7 +165,10 @@ export async function syncSettingsFromSupabase() {
 
   const hardenedSettings = await hardenAdminPin(settings);
   const migratedSettings = settings.admin_pin !== hardenedSettings.admin_pin
-    ? ((await writeSupabaseSettings(hardenedSettings)) || hardenedSettings)
+    ? (requireRemoteResult(
+        await writeSupabaseSettings(hardenedSettings),
+        'Production settings PIN migration failed.'
+      ) || hardenedSettings)
     : hardenedSettings;
 
   writeLocalSettings(migratedSettings, {
@@ -190,7 +196,10 @@ export async function ensureDefaultAdminPin() {
     admin_pin_hash: await hashPin(DEFAULT_ADMIN_PIN)
   };
 
-  const persistedSettings = (await writeSupabaseSettings(settings)) || settings;
+  const persistedSettings = requireRemoteResult(
+    await writeSupabaseSettings(settings),
+    'Production default admin PIN setup failed.'
+  ) || settings;
   writeLocalSettings(persistedSettings, {
     action: 'settings:ensure-default-admin-pin'
   });
@@ -211,7 +220,10 @@ export async function updateAdminPin(pin, metadata = {}) {
     admin_pin_hash: await hashPin(pin)
   };
 
-  const persistedSettings = (await writeSupabaseSettings(settings)) || settings;
+  const persistedSettings = requireRemoteResult(
+    await writeSupabaseSettings(settings),
+    'Production admin PIN update failed.'
+  ) || settings;
   writeLocalSettings(persistedSettings, {
     ...metadata,
     action: metadata.action || 'settings:update-admin-pin'
@@ -232,7 +244,10 @@ export async function updatePayrollWeekStart(payrollWeekStart) {
     payroll_week_start: payrollWeekStart
   };
 
-  const persistedSettings = (await writeSupabaseSettings(settings)) || settings;
+  const persistedSettings = requireRemoteResult(
+    await writeSupabaseSettings(settings),
+    'Production payroll settings update failed.'
+  ) || settings;
   writeLocalSettings(persistedSettings, {
     action: 'settings:update-payroll-week-start',
     payroll_week_start: payrollWeekStart

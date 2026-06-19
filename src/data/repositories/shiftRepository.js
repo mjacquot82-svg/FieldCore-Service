@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -117,7 +118,7 @@ export async function syncShiftsFromSupabase() {
   const shifts = await readSupabaseShifts(companyId);
   if (!shifts) return null;
 
-  if (!shifts.length && (state.shifts || []).length) {
+  if (!shifts.length && canUseLocalPersistenceFallback() && (state.shifts || []).length) {
     const bootstrappedShifts = await writeSupabaseShifts(state.shifts || []);
     if (!bootstrappedShifts) return null;
 
@@ -141,7 +142,7 @@ export function listShifts() {
 
 export async function listShiftsAsync() {
   const shifts = await readSupabaseShifts(await resolveRepositoryCompanyId());
-  return shifts || listShifts();
+  return requireRemoteResult(shifts, 'Production shift read failed.') || listShifts();
 }
 
 export function getActiveShift(employeeId) {
@@ -181,7 +182,10 @@ export async function startShift(employeeId, metadata = {}) {
     started_at: metadata.started_at || new Date().toISOString()
   };
 
-  const persistedShift = (await writeSupabaseShift(shift)) || shift;
+  const persistedShift = requireRemoteResult(
+    await writeSupabaseShift(shift),
+    'Production shift start failed.'
+  ) || shift;
 
   writeLocalShifts([...shifts, persistedShift], {
     ...metadata,
@@ -214,7 +218,10 @@ export async function endShift(employeeId, metadata = {}) {
   });
 
   if (!endedShift) return null;
-  const persistedShift = (await writeSupabaseShift(endedShift)) || endedShift;
+  const persistedShift = requireRemoteResult(
+    await writeSupabaseShift(endedShift),
+    'Production shift end failed.'
+  ) || endedShift;
   const persistedShifts = nextShifts.map((shift) => (
     shift.shift_id === persistedShift.shift_id ? persistedShift : shift
   ));

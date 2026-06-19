@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { hashPin } from '../pinHash.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
@@ -156,7 +157,7 @@ export async function syncEmployeesFromSupabase() {
   const employees = await readSupabaseEmployees(companyId);
   if (!employees) return null;
 
-  if (!employees.length && (state.employees || []).length) {
+  if (!employees.length && canUseLocalPersistenceFallback() && (state.employees || []).length) {
     const hardenedLocalEmployees = await hardenEmployeePins(state.employees || []);
     const bootstrappedEmployees = await writeSupabaseEmployees(hardenedLocalEmployees);
     if (!bootstrappedEmployees) return null;
@@ -170,7 +171,10 @@ export async function syncEmployeesFromSupabase() {
 
   const hardenedEmployees = await hardenEmployeePins(employees);
   const migratedEmployees = employees.some((employee, index) => employee.pin !== hardenedEmployees[index].pin)
-    ? ((await writeSupabaseEmployees(hardenedEmployees)) || hardenedEmployees)
+    ? (requireRemoteResult(
+        await writeSupabaseEmployees(hardenedEmployees),
+        'Production employee PIN migration failed.'
+      ) || hardenedEmployees)
     : hardenedEmployees;
 
   writeLocalEmployees(migratedEmployees, {
@@ -211,7 +215,10 @@ export async function createEmployee(employeeInput = {}) {
   const employees = state.employees || [];
   if (employees.some((item) => item.employee_id === employee.employee_id)) return null;
 
-  const persistedEmployee = (await writeSupabaseEmployee(employee)) || employee;
+  const persistedEmployee = requireRemoteResult(
+    await writeSupabaseEmployee(employee),
+    'Production employee create failed.'
+  ) || employee;
   const nextEmployees = [...employees, persistedEmployee];
 
   writeLocalEmployees(nextEmployees, {
@@ -243,7 +250,10 @@ export async function toggleEmployeeStatus(employeeId) {
   });
 
   if (!updatedEmployee) return null;
-  const persistedEmployee = (await writeSupabaseEmployee(updatedEmployee)) || updatedEmployee;
+  const persistedEmployee = requireRemoteResult(
+    await writeSupabaseEmployee(updatedEmployee),
+    'Production employee update failed.'
+  ) || updatedEmployee;
   const persistedEmployees = nextEmployees.map((employee) => (
     employee.employee_id === employeeId ? persistedEmployee : employee
   ));
@@ -280,7 +290,10 @@ export async function updateEmployeePin(employeeId, pin) {
   });
 
   if (!updatedEmployee) return null;
-  const persistedEmployee = (await writeSupabaseEmployee(updatedEmployee)) || updatedEmployee;
+  const persistedEmployee = requireRemoteResult(
+    await writeSupabaseEmployee(updatedEmployee),
+    'Production employee PIN update failed.'
+  ) || updatedEmployee;
   const persistedEmployees = nextEmployees.map((employee) => (
     employee.employee_id === employeeId ? persistedEmployee : employee
   ));
@@ -304,7 +317,10 @@ export async function deleteEmployee(employeeId) {
   const employee = (state.employees || []).find((item) => item.employee_id === employeeId);
   if (!employee) return null;
 
-  await deleteSupabaseEmployee(employeeId);
+  requireRemoteResult(
+    await deleteSupabaseEmployee(employeeId),
+    'Production employee delete failed.'
+  );
 
   writeLocalEmployees((state.employees || []).filter((item) => item.employee_id !== employeeId), {
     action: 'employee:delete',

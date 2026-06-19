@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -154,7 +155,7 @@ export async function syncVisitsFromSupabase() {
   const visits = await readSupabaseVisits(companyId);
   if (!visits) return null;
 
-  if (!visits.length && context?.membership?.role !== 'employee' && (state.visits || []).length) {
+  if (!visits.length && canUseLocalPersistenceFallback() && context?.membership?.role !== 'employee' && (state.visits || []).length) {
     const bootstrappedVisits = await writeSupabaseVisits(state.visits || []);
     if (!bootstrappedVisits) return null;
 
@@ -178,7 +179,7 @@ export function getVisit(visitId) {
 
 export async function getVisitAsync(visitId) {
   const visit = await readSupabaseVisit(visitId);
-  return visit || getVisit(visitId);
+  return requireRemoteResult(visit, 'Production visit read failed.') || getVisit(visitId);
 }
 
 export function listVisits() {
@@ -187,7 +188,7 @@ export function listVisits() {
 
 export async function listVisitsAsync() {
   const visits = await readSupabaseVisits(await resolveRepositoryCompanyId());
-  return visits || listVisits();
+  return requireRemoteResult(visits, 'Production visit read failed.') || listVisits();
 }
 
 export function listVisitsByDate(visitDate) {
@@ -202,7 +203,10 @@ export async function createVisit(visit, metadata = {}) {
     company_id: visit.company_id || companyId
   });
 
-  const persistedVisit = (await writeSupabaseVisit(nextVisit)) || nextVisit;
+  const persistedVisit = requireRemoteResult(
+    await writeSupabaseVisit(nextVisit),
+    'Production visit create failed.'
+  ) || nextVisit;
   writeLocalVisits([...(state.visits || []), persistedVisit], {
     ...metadata,
     action: metadata.action || 'visit:create',
@@ -254,7 +258,10 @@ export async function bulkCreateVisits(visits = [], metadata = {}) {
     created_at: visit.created_at || new Date().toISOString()
   }));
 
-  const persistedVisits = (await writeSupabaseVisits(nextVisits)) || nextVisits;
+  const persistedVisits = requireRemoteResult(
+    await writeSupabaseVisits(nextVisits),
+    'Production bulk visit create failed.'
+  ) || nextVisits;
   writeLocalVisits([...(state.visits || []), ...persistedVisits], {
     ...metadata,
     action: metadata.action || 'visit:create-many',
@@ -286,7 +293,10 @@ export async function updateVisit(visitId, patch = {}, metadata = {}) {
   });
 
   if (!updatedVisit) return null;
-  const persistedVisit = (await writeSupabaseVisit(updatedVisit)) || updatedVisit;
+  const persistedVisit = requireRemoteResult(
+    await writeSupabaseVisit(updatedVisit),
+    'Production visit update failed.'
+  ) || updatedVisit;
   const persistedVisits = nextVisits.map((visit) => (
     visit.visit_id === visitId ? persistedVisit : visit
   ));

@@ -1,3 +1,4 @@
+import { isProductionMode } from './appMode.js';
 import { syncEmployeesFromSupabase } from './repositories/employeeRepository.js';
 import { syncCompanyMembershipsFromSupabase } from './repositories/companyMembershipRepository.js';
 import { syncCustomersFromSupabase } from './repositories/customerRepository.js';
@@ -11,23 +12,31 @@ import { syncVisitsFromSupabase } from './repositories/visitRepository.js';
 import { resolveRepositoryCompanyContext } from './repositoryContext.js';
 import { isSupabaseConfigured } from './supabaseClient.js';
 
+function requireProductionSync(value, label) {
+  if (value !== null || !isProductionMode()) return value;
+  throw new Error(`Production Supabase sync failed for ${label}.`);
+}
+
 export async function syncFoundationFromSupabase() {
   if (!isSupabaseConfigured()) return { configured: false, synced: false };
 
   const initialAuthContext = await resolveRepositoryCompanyContext();
-  const companyMemberships = await syncCompanyMembershipsFromSupabase();
+  const companyMemberships = requireProductionSync(
+    await syncCompanyMembershipsFromSupabase(),
+    'company memberships'
+  );
   const authContext = await resolveRepositoryCompanyContext();
   const [settings, employees] = await Promise.all([
-    syncSettingsFromSupabase(),
-    syncEmployeesFromSupabase()
+    syncSettingsFromSupabase().then((value) => requireProductionSync(value, 'settings')),
+    syncEmployeesFromSupabase().then((value) => requireProductionSync(value, 'employees'))
   ]);
-  const customers = await syncCustomersFromSupabase();
-  const properties = await syncPropertiesFromSupabase();
-  const visits = await syncVisitsFromSupabase();
-  const routes = await syncRoutesFromSupabase();
-  const invoices = await syncInvoicesFromSupabase();
-  const payments = await syncPaymentsFromSupabase();
-  const shifts = await syncShiftsFromSupabase();
+  const customers = requireProductionSync(await syncCustomersFromSupabase(), 'customers');
+  const properties = requireProductionSync(await syncPropertiesFromSupabase(), 'properties');
+  const visits = requireProductionSync(await syncVisitsFromSupabase(), 'visits');
+  const routes = requireProductionSync(await syncRoutesFromSupabase(), 'routes');
+  const invoices = requireProductionSync(await syncInvoicesFromSupabase(), 'invoices');
+  const payments = requireProductionSync(await syncPaymentsFromSupabase(), 'payments');
+  const shifts = requireProductionSync(await syncShiftsFromSupabase(), 'shifts');
 
   return {
     configured: true,

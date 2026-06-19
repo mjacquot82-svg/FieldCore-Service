@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -146,7 +147,7 @@ export async function syncRoutesFromSupabase() {
   const routes = await readSupabaseRoutes(companyId);
   if (!routes) return null;
 
-  if (!routes.length && context?.membership?.role !== 'employee' && (state.routes || []).length) {
+  if (!routes.length && canUseLocalPersistenceFallback() && context?.membership?.role !== 'employee' && (state.routes || []).length) {
     const bootstrappedRoutes = await writeSupabaseRoutes(state.routes || []);
     if (!bootstrappedRoutes) return null;
 
@@ -170,7 +171,7 @@ export function listRoutes() {
 
 export async function listRoutesAsync() {
   const routes = await readSupabaseRoutes(await resolveRepositoryCompanyId());
-  return routes || listRoutes();
+  return requireRemoteResult(routes, 'Production route read failed.') || listRoutes();
 }
 
 export function listRoutesByDate(routeDate) {
@@ -189,7 +190,7 @@ export function getRoute(routeId) {
 
 export async function getRouteAsync(routeId) {
   const route = await readSupabaseRoute(routeId);
-  return route || getRoute(routeId);
+  return requireRemoteResult(route, 'Production route read failed.') || getRoute(routeId);
 }
 
 export async function createRoute(routeInput = {}, metadata = {}) {
@@ -207,7 +208,10 @@ export async function createRoute(routeInput = {}, metadata = {}) {
     created_at: routeInput.created_at || new Date().toISOString()
   };
 
-  const persistedRoute = (await writeSupabaseRoute(route)) || route;
+  const persistedRoute = requireRemoteResult(
+    await writeSupabaseRoute(route),
+    'Production route create failed.'
+  ) || route;
   writeLocalRoutes([...(state.routes || []), persistedRoute], {
     ...metadata,
     action: metadata.action || 'route:create',
@@ -239,7 +243,10 @@ export async function updateRoute(routeId, patch = {}, metadata = {}) {
   });
 
   if (!updatedRoute) return null;
-  const persistedRoute = (await writeSupabaseRoute(updatedRoute)) || updatedRoute;
+  const persistedRoute = requireRemoteResult(
+    await writeSupabaseRoute(updatedRoute),
+    'Production route update failed.'
+  ) || updatedRoute;
   const persistedRoutes = nextRoutes.map((route) => (
     route.route_id === routeId ? persistedRoute : route
   ));
@@ -265,7 +272,10 @@ export async function deleteRoute(routeId, metadata = {}) {
   const route = (state.routes || []).find((item) => item.route_id === routeId);
   if (!route) return null;
 
-  await deleteSupabaseRoute(routeId);
+  requireRemoteResult(
+    await deleteSupabaseRoute(routeId),
+    'Production route delete failed.'
+  );
   writeLocalRoutes((state.routes || []).filter((item) => item.route_id !== routeId), {
     ...metadata,
     action: metadata.action || 'route:delete',

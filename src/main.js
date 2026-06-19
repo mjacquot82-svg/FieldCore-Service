@@ -32,6 +32,12 @@ import {
   scheduleOneOffVisit,
   scheduleVisit
 } from './data/repositories/visitRepository.js';
+import {
+  getAppMode,
+  getProductionModeRequirementMessage,
+  isProductionMode
+} from './data/appMode.js';
+import { validateRepositoryAuthContext } from './data/repositoryContext.js';
 import { syncFoundationFromSupabase } from './data/supabaseFoundation.js';
 
 const app = document.querySelector('#app');
@@ -47,6 +53,7 @@ let showOverdueRoute = false;
 let billingSelectedVisitIds = new Set();
 let billingDateFilter = 'all';
 let billingSortOrder = 'newest';
+let productionModeBlockedReason = '';
 
 const ALL_NAV_ITEMS = [
   ['dashboard', 'Dashboard'],
@@ -238,6 +245,11 @@ function renderPropertyQuickActionCards(properties, customerMap) {
 }
 
 async function render() {
+  if (productionModeBlockedReason) {
+    renderProductionModeBlocker(productionModeBlockedReason);
+    return;
+  }
+
   currentSession = getSession();
   if (!currentSession) {
     renderLogin();
@@ -264,6 +276,18 @@ async function render() {
 
   app.innerHTML = `<div class="layout"><aside class="sidebar"><h1>${companyName}</h1><nav>${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></aside><main class="content">${sessionBanner}${flashMessage ? `<div class="flash">${flashMessage}</div>` : ''}${overdueBanner}${renderView(activeView, metrics, customerMap, propertyMap)}</main><nav class="bottom-nav">${navItems.map(([id, label]) => `<button class="nav-btn ${activeView === id ? 'active' : ''}" data-nav="${id}">${label}</button>`).join('')}</nav></div>`;
   bindEvents();
+}
+
+function renderProductionModeBlocker(reason) {
+  app.innerHTML = `
+    <main class="content login-shell">
+      <section class="panel login-card">
+        <h1>FieldCore Production Mode</h1>
+        <p>${reason}</p>
+        <p>Current mode: ${getAppMode()}</p>
+      </section>
+    </main>
+  `;
 }
 
 function renderView(view, metrics, customerMap, propertyMap) {
@@ -734,10 +758,27 @@ function bindEvents() {
 }
 
 async function initializeApp() {
+  if (isProductionMode()) {
+    const diagnostics = await validateRepositoryAuthContext();
+    productionModeBlockedReason = getProductionModeRequirementMessage({
+      ...diagnostics,
+      supabaseConfigured: Boolean(diagnostics.transport?.configured)
+    });
+
+    if (productionModeBlockedReason) {
+      await render();
+      return;
+    }
+  }
+
   try {
     await syncFoundationFromSupabase();
-  } catch {
-    // Local storage remains the fallback source of truth if remote sync fails unexpectedly.
+  } catch (error) {
+    if (isProductionMode()) {
+      productionModeBlockedReason = error?.message || 'Production Supabase sync failed.';
+      await render();
+      return;
+    }
   }
   state = loadState();
   currentSession = getSession();

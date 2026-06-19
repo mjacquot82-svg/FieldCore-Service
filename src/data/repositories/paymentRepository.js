@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -111,7 +112,7 @@ export async function syncPaymentsFromSupabase() {
   const payments = await readSupabasePayments(companyId);
   if (!payments) return null;
 
-  if (!payments.length && context?.membership?.role !== 'employee' && (state.payments || []).length) {
+  if (!payments.length && canUseLocalPersistenceFallback() && context?.membership?.role !== 'employee' && (state.payments || []).length) {
     const bootstrappedPayments = await writeSupabasePayments(state.payments || []);
     if (!bootstrappedPayments) return null;
 
@@ -135,7 +136,7 @@ export function listPayments() {
 
 export async function listPaymentsAsync() {
   const payments = await readSupabasePayments(await resolveRepositoryCompanyId());
-  return payments || listPayments();
+  return requireRemoteResult(payments, 'Production payment read failed.') || listPayments();
 }
 
 export function listPaymentsByInvoice(invoiceId) {
@@ -156,7 +157,10 @@ export async function createPayment(paymentInput = {}, metadata = {}) {
     created_at: paymentInput.created_at || new Date().toISOString()
   };
 
-  const persistedPayment = (await writeSupabasePayment(payment)) || payment;
+  const persistedPayment = requireRemoteResult(
+    await writeSupabasePayment(payment),
+    'Production payment create failed.'
+  ) || payment;
   writeLocalPayments([...(state.payments || []), persistedPayment], {
     ...metadata,
     action: metadata.action || 'payment:create',
@@ -187,7 +191,10 @@ export async function updatePayment(paymentId, patch = {}, metadata = {}) {
   });
 
   if (!updatedPayment) return null;
-  const persistedPayment = (await writeSupabasePayment(updatedPayment)) || updatedPayment;
+  const persistedPayment = requireRemoteResult(
+    await writeSupabasePayment(updatedPayment),
+    'Production payment update failed.'
+  ) || updatedPayment;
   const persistedPayments = nextPayments.map((payment) => (
     payment.payment_id === paymentId ? persistedPayment : payment
   ));

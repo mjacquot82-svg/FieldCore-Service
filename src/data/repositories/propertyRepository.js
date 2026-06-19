@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -132,7 +133,7 @@ export async function syncPropertiesFromSupabase() {
   const properties = await readSupabaseProperties(companyId);
   if (!properties) return null;
 
-  if (!properties.length && (state.properties || []).length) {
+  if (!properties.length && canUseLocalPersistenceFallback() && (state.properties || []).length) {
     const bootstrappedProperties = await writeSupabaseProperties(state.properties || []);
     if (!bootstrappedProperties) return null;
 
@@ -156,7 +157,7 @@ export function listProperties() {
 
 export async function listPropertiesAsync() {
   const properties = await readSupabaseProperties(await resolveRepositoryCompanyId());
-  return properties || listProperties();
+  return requireRemoteResult(properties, 'Production property read failed.') || listProperties();
 }
 
 export function getProperty(propertyId) {
@@ -166,7 +167,7 @@ export function getProperty(propertyId) {
 
 export async function getPropertyAsync(propertyId) {
   const property = await readSupabaseProperty(propertyId);
-  return property || getProperty(propertyId);
+  return requireRemoteResult(property, 'Production property read failed.') || getProperty(propertyId);
 }
 
 export async function createProperty(propertyInput = {}) {
@@ -191,7 +192,10 @@ export async function createProperty(propertyInput = {}) {
     created_at: propertyInput.created_at || new Date().toISOString()
   };
 
-  const persistedProperty = (await writeSupabaseProperty(property)) || property;
+  const persistedProperty = requireRemoteResult(
+    await writeSupabaseProperty(property),
+    'Production property create failed.'
+  ) || property;
   writeLocalProperties([...(state.properties || []), persistedProperty], {
     action: 'property:create',
     property_id: persistedProperty.property_id
@@ -221,7 +225,10 @@ export async function updateProperty(propertyId, patch = {}, metadata = {}) {
   });
 
   if (!updatedProperty) return null;
-  const persistedProperty = (await writeSupabaseProperty(updatedProperty)) || updatedProperty;
+  const persistedProperty = requireRemoteResult(
+    await writeSupabaseProperty(updatedProperty),
+    'Production property update failed.'
+  ) || updatedProperty;
   const persistedProperties = nextProperties.map((property) => (
     property.property_id === propertyId ? persistedProperty : property
   ));
@@ -268,7 +275,10 @@ export async function deactivatePropertiesByCustomer(customerId, metadata = {}) 
   });
 
   const persistedDeactivatedProperties = deactivatedProperties.length
-    ? ((await writeSupabaseProperties(deactivatedProperties)) || deactivatedProperties)
+    ? (requireRemoteResult(
+        await writeSupabaseProperties(deactivatedProperties),
+        'Production property deactivate failed.'
+      ) || deactivatedProperties)
     : [];
   const persistedById = new Map(persistedDeactivatedProperties.map((property) => [
     property.property_id,

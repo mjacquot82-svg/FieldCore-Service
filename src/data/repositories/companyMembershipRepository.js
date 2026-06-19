@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { getAuthenticatedUser } from '../supabaseAuth.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -181,11 +182,22 @@ async function writeBootstrapMemberships(memberships) {
 }
 
 export async function syncCompanyMembershipsFromSupabase() {
-  const state = readState();
-  const memberships = await readSupabaseMemberships(state.company?.company_id);
+  const state = canUseLocalPersistenceFallback() ? readState() : {};
+  const user = await getAuthenticatedUser();
+  const userMembership = !canUseLocalPersistenceFallback() && user?.id
+    ? await readSupabaseMembershipForUser(null, user.id)
+    : null;
+  const companyId = state.company?.company_id || userMembership?.company_id;
+  const memberships = await readSupabaseMemberships(companyId);
+  if (!memberships && userMembership) {
+    writeLocalMemberships([userMembership], {
+      action: 'company-memberships:sync-current-user'
+    });
+    return [clone(userMembership)];
+  }
   if (!memberships) return null;
 
-  if (!memberships.length) {
+  if (!memberships.length && canUseLocalPersistenceFallback()) {
     const local = localMemberships();
     const bootstrapMemberships = local.length
       ? local
@@ -211,18 +223,20 @@ export function listCompanyMemberships() {
   return clone(localMemberships());
 }
 
-export async function getCompanyMembershipForUser(userId, companyId = readState().company?.company_id) {
-  const remoteMembership = await readSupabaseMembershipForUser(companyId, userId);
+export async function getCompanyMembershipForUser(userId, companyId = null) {
+  const scopedCompanyId = companyId || (canUseLocalPersistenceFallback() ? readState().company?.company_id : null);
+  const remoteMembership = await readSupabaseMembershipForUser(scopedCompanyId, userId);
   if (remoteMembership) return remoteMembership;
+  if (!canUseLocalPersistenceFallback()) return null;
 
   const localMembership = localMemberships().find((membership) =>
-    (!companyId || membership.company_id === companyId) &&
+    (!scopedCompanyId || membership.company_id === scopedCompanyId) &&
     membership.user_id === userId &&
     membership.status === 'active'
   );
 
   if (localMembership) return clone(localMembership);
-  if (!companyId) return null;
+  if (!scopedCompanyId) return null;
 
   const remoteMembershipForAnyCompany = await readSupabaseMembershipForUser(null, userId);
   if (remoteMembershipForAnyCompany) return remoteMembershipForAnyCompany;
@@ -247,7 +261,10 @@ export async function ensureDefaultOwnerMembership(metadata = {}) {
   const membership = makeDefaultOwnerMembership(state.company);
   if (!membership) return null;
 
-  const persistedMembership = (await writeSupabaseMembership(membership)) || membership;
+  const persistedMembership = requireRemoteResult(
+    await writeSupabaseMembership(membership),
+    'Production owner membership create failed.'
+  ) || membership;
   writeLocalMemberships([...localMemberships(), persistedMembership], {
     ...metadata,
     action: metadata.action || 'company-membership:ensure-default-owner',
@@ -290,7 +307,10 @@ export async function attachOwnerMembershipToUser(userId, metadata = {}) {
     ...ownerMembership,
     user_id: userId
   };
-  const persistedMembership = (await writeSupabaseMembership(linkedMembership)) || linkedMembership;
+  const persistedMembership = requireRemoteResult(
+    await writeSupabaseMembership(linkedMembership),
+    'Production owner membership link failed.'
+  ) || linkedMembership;
   const memberships = localMemberships();
   const nextMemberships = memberships.some((membership) => membership.membership_id === persistedMembership.membership_id)
     ? memberships.map((membership) => (

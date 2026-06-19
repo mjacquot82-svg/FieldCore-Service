@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -252,7 +253,7 @@ export async function syncInvoicesFromSupabase() {
   const invoices = await readSupabaseInvoices(companyId);
   if (!invoices) return null;
 
-  if (!invoices.length && context?.membership?.role !== 'employee' && (state.invoices || []).length) {
+  if (!invoices.length && canUseLocalPersistenceFallback() && context?.membership?.role !== 'employee' && (state.invoices || []).length) {
     const bootstrappedInvoices = await writeSupabaseInvoices(state.invoices || []);
     if (!bootstrappedInvoices) return null;
 
@@ -276,7 +277,7 @@ export function listInvoices() {
 
 export async function listInvoicesAsync() {
   const invoices = await readSupabaseInvoices(await resolveRepositoryCompanyId());
-  return invoices || listInvoices();
+  return requireRemoteResult(invoices, 'Production invoice read failed.') || listInvoices();
 }
 
 export function getInvoice(invoiceId) {
@@ -286,7 +287,7 @@ export function getInvoice(invoiceId) {
 
 export async function getInvoiceAsync(invoiceId) {
   const invoice = await readSupabaseInvoice(invoiceId);
-  return invoice || getInvoice(invoiceId);
+  return requireRemoteResult(invoice, 'Production invoice read failed.') || getInvoice(invoiceId);
 }
 
 export function listOpenInvoices() {
@@ -302,7 +303,10 @@ export async function createInvoices(invoices, metadata = {}) {
     ...invoice,
     company_id: invoice.company_id || companyId
   }));
-  const persistedInvoices = (await writeSupabaseInvoices(nextInvoices)) || nextInvoices;
+  const persistedInvoices = requireRemoteResult(
+    await writeSupabaseInvoices(nextInvoices),
+    'Production invoice create failed.'
+  ) || nextInvoices;
 
   writeLocalInvoices([...(state.invoices || []), ...persistedInvoices], {
     ...metadata,
@@ -335,7 +339,10 @@ export async function updateInvoicePaymentFields(invoiceId, patch = {}, metadata
   });
 
   if (!updatedInvoice) return null;
-  const persistedInvoice = (await writeSupabaseInvoice(updatedInvoice)) || updatedInvoice;
+  const persistedInvoice = requireRemoteResult(
+    await writeSupabaseInvoice(updatedInvoice),
+    'Production invoice update failed.'
+  ) || updatedInvoice;
   const persistedInvoices = nextInvoices.map((invoice) => (
     invoice.invoice_id === invoiceId ? persistedInvoice : invoice
   ));

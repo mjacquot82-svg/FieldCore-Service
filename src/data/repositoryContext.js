@@ -1,4 +1,5 @@
 import { getAuthenticatedUser } from './supabaseAuth.js';
+import { isProductionMode } from './appMode.js';
 import { getCompanyMembershipForUser } from './repositories/companyMembershipRepository.js';
 import { getSupabaseTransportContext } from './supabaseClient.js';
 import { readState } from './storage/local-state-adapter.js';
@@ -30,7 +31,7 @@ export function getActiveRepositoryContext() {
 }
 
 export async function resolveRepositoryCompanyContext() {
-  const state = readState();
+  const state = isProductionMode() ? {} : readState();
   const localCompany = getLocalCompany(state);
   const localCompanyId = localCompany?.company_id || null;
   const user = await getAuthenticatedUser();

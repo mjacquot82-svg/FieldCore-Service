@@ -1,4 +1,5 @@
 import { emit } from '../appEventBus.js';
+import { canUseLocalPersistenceFallback, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyId } from '../repositoryContext.js';
 import { supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
@@ -190,7 +191,7 @@ export async function syncCustomersFromSupabase() {
   const customers = await readSupabaseCustomers(companyId);
   if (!customers) return null;
 
-  if (!customers.length && (state.customers || []).length) {
+  if (!customers.length && canUseLocalPersistenceFallback() && (state.customers || []).length) {
     const bootstrappedCustomers = await writeSupabaseCustomers(state.customers || []);
     if (!bootstrappedCustomers) return null;
 
@@ -219,12 +220,12 @@ export function getCustomer(customerId) {
 
 export async function listCustomersAsync() {
   const customers = await readSupabaseCustomers(await resolveRepositoryCompanyId());
-  return customers || listCustomers();
+  return requireRemoteResult(customers, 'Production customer read failed.') || listCustomers();
 }
 
 export async function getCustomerAsync(customerId) {
   const customer = await readSupabaseCustomer(customerId);
-  return customer || getCustomer(customerId);
+  return requireRemoteResult(customer, 'Production customer read failed.') || getCustomer(customerId);
 }
 
 export async function createCustomer(customerInput = {}) {
@@ -250,7 +251,10 @@ export async function createCustomer(customerInput = {}) {
   const customers = state.customers || [];
   if (customers.some((item) => item.customer_id === customer.customer_id)) return null;
 
-  const persistedCustomer = (await writeSupabaseCustomer(customer)) || customer;
+  const persistedCustomer = requireRemoteResult(
+    await writeSupabaseCustomer(customer),
+    'Production customer create failed.'
+  ) || customer;
   writeLocalCustomers([...customers, persistedCustomer], {
     action: 'customer:create',
     customer_id: persistedCustomer.customer_id
@@ -280,7 +284,10 @@ export async function updateCustomer(customerId, patch = {}, metadata = {}) {
   });
 
   if (!updatedCustomer) return null;
-  const persistedCustomer = (await writeSupabaseCustomer(updatedCustomer)) || updatedCustomer;
+  const persistedCustomer = requireRemoteResult(
+    await writeSupabaseCustomer(updatedCustomer),
+    'Production customer update failed.'
+  ) || updatedCustomer;
   const persistedCustomers = nextCustomers.map((customer) => (
     customer.customer_id === customerId ? persistedCustomer : customer
   ));
