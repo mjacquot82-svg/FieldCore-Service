@@ -1124,6 +1124,8 @@ create table if not exists public.invoices (
   company_id text not null references public.companies(company_id) on delete cascade,
   customer_id text not null references public.customers(customer_id) on delete restrict,
   invoice_number text not null,
+  invoice_sequence integer,
+  idempotency_key text,
   invoice_date date not null,
   due_date date not null,
   visit_ids jsonb not null default '[]'::jsonb,
@@ -1146,6 +1148,12 @@ create table if not exists public.invoices (
 
 alter table public.invoices
   add column if not exists visit_ids jsonb not null default '[]'::jsonb;
+
+alter table public.invoices
+  add column if not exists invoice_sequence integer;
+
+alter table public.invoices
+  add column if not exists idempotency_key text;
 
 create table if not exists public.invoice_line_items (
   line_item_id text primary key default ('ili_' || replace(gen_random_uuid()::text, '-', '')),
@@ -1178,9 +1186,18 @@ create table if not exists public.payments (
   )
 );
 
+create table if not exists public.company_invoice_counters (
+  company_id text primary key references public.companies(company_id) on delete cascade,
+  next_invoice_sequence integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint company_invoice_counters_next_sequence_check check (next_invoice_sequence >= 1)
+);
+
 alter table public.invoices enable row level security;
 alter table public.invoice_line_items enable row level security;
 alter table public.payments enable row level security;
+alter table public.company_invoice_counters enable row level security;
 
 drop policy if exists "owners admins and managers can read invoices" on public.invoices;
 create policy "owners admins and managers can read invoices"
@@ -1286,6 +1303,21 @@ create policy "owners and admins can delete payments"
   for delete
   to authenticated
   using (public.has_company_role(company_id, array['owner', 'admin']));
+
+drop policy if exists "owners admins and managers can read invoice counters" on public.company_invoice_counters;
+create policy "owners admins and managers can read invoice counters"
+  on public.company_invoice_counters
+  for select
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
+
+drop policy if exists "owners admins and managers can manage invoice counters" on public.company_invoice_counters;
+create policy "owners admins and managers can manage invoice counters"
+  on public.company_invoice_counters
+  for all
+  to authenticated
+  using (public.has_company_role(company_id, array['owner', 'admin', 'manager']))
+  with check (public.has_company_role(company_id, array['owner', 'admin', 'manager']));
 
 create table if not exists public.shifts (
   shift_id text primary key default ('shift_' || replace(gen_random_uuid()::text, '-', '')),
@@ -1475,10 +1507,19 @@ create index if not exists invoices_company_id_idx on public.invoices(company_id
 create index if not exists invoices_customer_id_idx on public.invoices(customer_id);
 create index if not exists invoices_company_status_due_idx on public.invoices(company_id, payment_status, due_date);
 create index if not exists invoices_company_invoice_date_idx on public.invoices(company_id, invoice_date);
+create unique index if not exists invoices_company_idempotency_customer_idx
+  on public.invoices(company_id, idempotency_key, customer_id)
+  where idempotency_key is not null;
+create unique index if not exists invoices_company_sequence_idx
+  on public.invoices(company_id, invoice_sequence)
+  where invoice_sequence is not null;
 
 create index if not exists invoice_line_items_company_id_idx on public.invoice_line_items(company_id);
 create index if not exists invoice_line_items_invoice_order_idx on public.invoice_line_items(invoice_id, line_order);
 create index if not exists invoice_line_items_visit_id_idx on public.invoice_line_items(visit_id);
+create unique index if not exists invoice_line_items_company_visit_once_idx
+  on public.invoice_line_items(company_id, visit_id)
+  where visit_id is not null;
 
 create index if not exists payments_company_id_idx on public.payments(company_id);
 create index if not exists payments_invoice_id_idx on public.payments(invoice_id);
@@ -1493,6 +1534,300 @@ create index if not exists activity_events_customer_occurred_idx on public.activ
 create index if not exists activity_events_property_occurred_idx on public.activity_events(property_id, occurred_at desc);
 create index if not exists activity_events_visit_occurred_idx on public.activity_events(visit_id, occurred_at desc);
 create index if not exists activity_events_invoice_occurred_idx on public.activity_events(invoice_id, occurred_at desc);
+
+create or replace function public.generate_billing_invoices(
+  target_company_id text,
+  target_visit_ids text[],
+  target_idempotency_key text,
+  target_invoice_date date default current_date,
+  target_due_date date default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  normalized_visit_ids text[];
+  existing_invoice_count integer;
+  existing_visit_ids text[];
+  requested_visit_count integer;
+  existing_visit_count integer;
+  invoice_prefix text;
+  default_due_days integer;
+  tax_rate numeric(7, 6);
+  customer_record record;
+  invoice_record record;
+  invoice_id text;
+  invoice_sequence integer;
+  invoice_number text;
+  invoice_subtotal numeric(12, 2);
+  invoice_tax numeric(12, 2);
+  invoice_total numeric(12, 2);
+  created_invoice_ids text[] := array[]::text[];
+  billed_visit_ids text[] := array[]::text[];
+begin
+  if not public.has_company_role(target_company_id, array['owner', 'admin', 'manager']) then
+    raise exception 'Active owner, admin, or manager membership is required for billing.';
+  end if;
+
+  if target_company_id is null or btrim(target_company_id) = '' then
+    raise exception 'company_id is required.';
+  end if;
+
+  if target_idempotency_key is null or btrim(target_idempotency_key) = '' then
+    raise exception 'idempotency_key is required.';
+  end if;
+
+  target_invoice_date := coalesce(target_invoice_date, current_date);
+
+  select coalesce(array_agg(distinct visit_id order by visit_id), array[]::text[])
+  into normalized_visit_ids
+  from unnest(coalesce(target_visit_ids, array[]::text[])) as visit_id
+  where visit_id is not null and btrim(visit_id) <> '';
+
+  requested_visit_count := coalesce(array_length(normalized_visit_ids, 1), 0);
+  if requested_visit_count = 0 then
+    raise exception 'At least one visit_id is required.';
+  end if;
+
+  select count(*)
+  into existing_invoice_count
+  from public.invoices i
+  where i.company_id = target_company_id
+    and i.idempotency_key = target_idempotency_key;
+
+  if existing_invoice_count > 0 then
+    select coalesce(array_agg(distinct li.visit_id order by li.visit_id), array[]::text[])
+    into existing_visit_ids
+    from public.invoice_line_items li
+    join public.invoices i on i.invoice_id = li.invoice_id
+    where i.company_id = target_company_id
+      and i.idempotency_key = target_idempotency_key
+      and li.visit_id is not null;
+
+    select count(*) into existing_visit_count
+    from unnest(existing_visit_ids) existing_id
+    where existing_id = any(normalized_visit_ids);
+
+    if coalesce(array_length(existing_visit_ids, 1), 0) <> requested_visit_count
+      or existing_visit_count <> requested_visit_count then
+      raise exception 'Idempotency key was already used for a different visit set.';
+    end if;
+
+    return (
+      select jsonb_build_object(
+        'idempotent_replay', true,
+        'created_count', count(*),
+        'billed_visit_count', requested_visit_count,
+        'invoice_ids', coalesce(jsonb_agg(i.invoice_id order by i.invoice_number), '[]'::jsonb),
+        'invoices', coalesce(jsonb_agg(to_jsonb(i) order by i.invoice_number), '[]'::jsonb)
+      )
+      from public.invoices i
+      where i.company_id = target_company_id
+        and i.idempotency_key = target_idempotency_key
+    );
+  end if;
+
+  select
+    coalesce(cs.invoice_prefix, 'FC'),
+    coalesce(cs.default_due_days, 15),
+    coalesce(cs.tax_rate, 0)
+  into invoice_prefix, default_due_days, tax_rate
+  from public.company_settings cs
+  where cs.company_id = target_company_id
+  limit 1;
+
+  if invoice_prefix is null then
+    invoice_prefix := 'FC';
+    default_due_days := 15;
+    tax_rate := 0;
+  end if;
+
+  if target_due_date is null then
+    target_due_date := target_invoice_date + default_due_days;
+  end if;
+
+  insert into public.company_invoice_counters (company_id, next_invoice_sequence)
+  values (target_company_id, 1)
+  on conflict (company_id) do nothing;
+
+  perform 1
+  from public.company_invoice_counters
+  where company_id = target_company_id
+  for update;
+
+  drop table if exists pg_temp.billing_selected_visits;
+
+  perform 1
+  from public.visits v
+  where v.company_id = target_company_id
+    and v.visit_id = any(normalized_visit_ids)
+  for update;
+
+  create temporary table billing_selected_visits on commit drop as
+  select
+    v.visit_id,
+    v.company_id,
+    v.property_id,
+    v.visit_date,
+    v.service_description,
+    v.price,
+    v.status,
+    p.customer_id,
+    c.name as customer_name
+  from public.visits v
+  join public.properties p
+    on p.property_id = v.property_id
+   and p.company_id = v.company_id
+  join public.customers c
+    on c.customer_id = p.customer_id
+   and c.company_id = v.company_id
+  where v.company_id = target_company_id
+    and v.visit_id = any(normalized_visit_ids);
+
+  if (select count(*) from billing_selected_visits) <> requested_visit_count then
+    raise exception 'One or more visits were not found for this company.';
+  end if;
+
+  if exists (select 1 from billing_selected_visits where status <> 'completed') then
+    raise exception 'Only completed visits can be invoiced.';
+  end if;
+
+  if exists (
+    select 1
+    from public.invoice_line_items li
+    where li.company_id = target_company_id
+      and li.visit_id = any(normalized_visit_ids)
+  ) then
+    raise exception 'One or more visits have already been invoiced.';
+  end if;
+
+  for customer_record in
+    select
+      customer_id,
+      max(customer_name) as customer_name,
+      coalesce(sum(price), 0)::numeric(12, 2) as subtotal,
+      array_agg(visit_id order by visit_date, visit_id) as visit_ids
+    from billing_selected_visits
+    group by customer_id
+    order by customer_id
+  loop
+    select next_invoice_sequence
+    into invoice_sequence
+    from public.company_invoice_counters
+    where company_id = target_company_id;
+
+    update public.company_invoice_counters
+    set next_invoice_sequence = next_invoice_sequence + 1,
+        updated_at = now()
+    where company_id = target_company_id;
+
+    invoice_id := 'inv_' || replace(gen_random_uuid()::text, '-', '');
+    invoice_number := invoice_prefix || '-' || extract(year from target_invoice_date)::int || '-' || lpad(invoice_sequence::text, 4, '0');
+    invoice_subtotal := round(customer_record.subtotal, 2);
+    invoice_tax := round(invoice_subtotal * tax_rate, 2);
+    invoice_total := round(invoice_subtotal + invoice_tax, 2);
+
+    if invoice_subtotal < 0 or invoice_tax < 0 or invoice_total < 0 or invoice_total <> round(invoice_subtotal + invoice_tax, 2) then
+      raise exception 'Invoice totals are inconsistent.';
+    end if;
+
+    insert into public.invoices (
+      invoice_id,
+      company_id,
+      customer_id,
+      invoice_number,
+      invoice_sequence,
+      idempotency_key,
+      invoice_date,
+      due_date,
+      visit_ids,
+      subtotal,
+      tax,
+      total,
+      payment_status,
+      amount_paid,
+      customer_name
+    )
+    values (
+      invoice_id,
+      target_company_id,
+      customer_record.customer_id,
+      invoice_number,
+      invoice_sequence,
+      target_idempotency_key,
+      target_invoice_date,
+      target_due_date,
+      to_jsonb(customer_record.visit_ids),
+      invoice_subtotal,
+      invoice_tax,
+      invoice_total,
+      'draft',
+      0,
+      customer_record.customer_name
+    )
+    returning * into invoice_record;
+
+    insert into public.invoice_line_items (
+      line_item_id,
+      company_id,
+      invoice_id,
+      visit_id,
+      property_id,
+      description,
+      amount,
+      line_order
+    )
+    select
+      'ili_' || replace(gen_random_uuid()::text, '-', ''),
+      target_company_id,
+      invoice_id,
+      bsv.visit_id,
+      bsv.property_id,
+      coalesce(bsv.service_description, 'Service visit') || ' (' || bsv.visit_date::text || ')',
+      round(coalesce(bsv.price, 0), 2),
+      row_number() over (order by bsv.visit_date, bsv.visit_id) - 1
+    from billing_selected_visits bsv
+    where bsv.customer_id = customer_record.customer_id;
+
+    if (
+      select round(coalesce(sum(amount), 0), 2)
+      from public.invoice_line_items
+      where company_id = target_company_id
+        and invoice_id = invoice_record.invoice_id
+    ) <> invoice_subtotal then
+      raise exception 'Invoice line item total does not match invoice subtotal.';
+    end if;
+
+    created_invoice_ids := array_append(created_invoice_ids, invoice_record.invoice_id);
+  end loop;
+
+  update public.visits
+  set status = 'billed',
+      updated_at = now()
+  where company_id = target_company_id
+    and visit_id = any(normalized_visit_ids);
+
+  billed_visit_ids := normalized_visit_ids;
+
+  return (
+    select jsonb_build_object(
+      'idempotent_replay', false,
+      'created_count', count(*),
+      'billed_visit_count', coalesce(array_length(billed_visit_ids, 1), 0),
+      'invoice_ids', coalesce(jsonb_agg(i.invoice_id order by i.invoice_number), '[]'::jsonb),
+      'invoices', coalesce(jsonb_agg(to_jsonb(i) order by i.invoice_number), '[]'::jsonb)
+    )
+    from public.invoices i
+    where i.company_id = target_company_id
+      and i.invoice_id = any(created_invoice_ids)
+  );
+end;
+$$;
+
+comment on function public.generate_billing_invoices(text, text[], text, date, date)
+  is 'Atomically creates customer-grouped invoices and line items for completed visits, marks visits billed, and returns idempotent results for retries.';
 
 create or replace trigger set_companies_updated_at
   before update on public.companies
@@ -1548,6 +1883,10 @@ create or replace trigger set_invoice_line_items_updated_at
 
 create or replace trigger set_payments_updated_at
   before update on public.payments
+  for each row execute function public.set_updated_at();
+
+create or replace trigger set_company_invoice_counters_updated_at
+  before update on public.company_invoice_counters
   for each row execute function public.set_updated_at();
 
 create or replace trigger set_shifts_updated_at

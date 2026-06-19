@@ -1,7 +1,7 @@
 import { emit } from '../appEventBus.js';
 import { canUseLocalPersistenceFallback, isProductionMode, requireRemoteResult } from '../appMode.js';
 import { resolveRepositoryCompanyContext, resolveRepositoryCompanyId } from '../repositoryContext.js';
-import { supabaseDelete, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
+import { supabaseDelete, supabaseRpc, supabaseSelect, supabaseUpsert } from '../supabaseClient.js';
 import { readState, writeState } from '../storage/local-state-adapter.js';
 
 const INVOICE_FIELDS = [
@@ -9,6 +9,8 @@ const INVOICE_FIELDS = [
   'company_id',
   'customer_id',
   'invoice_number',
+  'invoice_sequence',
+  'idempotency_key',
   'invoice_date',
   'due_date',
   'visit_ids',
@@ -90,6 +92,8 @@ function normalizeInvoiceForSupabase(invoice) {
     company_id: invoice.company_id,
     customer_id: invoice.customer_id,
     invoice_number: invoice.invoice_number || '',
+    invoice_sequence: invoice.invoice_sequence ?? null,
+    idempotency_key: invoice.idempotency_key || null,
     invoice_date: invoice.invoice_date,
     due_date: invoice.due_date,
     visit_ids: Array.isArray(invoice.visit_ids) ? invoice.visit_ids : [],
@@ -223,6 +227,21 @@ async function writeSupabaseInvoice(invoice) {
   return normalizeInvoiceFromSupabase(response.data[0], groupLineItems(lineItems));
 }
 
+async function writeSupabaseInvoiceRecord(invoice) {
+  const record = normalizeInvoiceForSupabase(invoice);
+  if (!record.invoice_id || !record.company_id || !record.customer_id) return null;
+
+  const response = await supabaseUpsert('invoices', record, {
+    onConflict: 'invoice_id'
+  });
+
+  if (!response.configured || response.error || !Array.isArray(response.data)) return null;
+  return {
+    ...normalizeInvoiceFromSupabase(response.data[0]),
+    line_items: invoice.line_items || []
+  };
+}
+
 async function writeSupabaseInvoices(invoices) {
   const records = invoices.map(normalizeInvoiceForSupabase).filter((invoice) => (
     invoice.invoice_id && invoice.company_id && invoice.customer_id
@@ -324,6 +343,64 @@ export async function createInvoices(invoices, metadata = {}) {
   return clone(persistedInvoices);
 }
 
+export async function createBillingInvoicesForVisits({
+  visitIds = [],
+  idempotencyKey,
+  invoiceDate,
+  dueDate
+} = {}, metadata = {}) {
+  const companyId = await resolveRepositoryCompanyId();
+  const normalizedVisitIds = [...new Set((visitIds || []).filter(Boolean))].sort();
+  if (!companyId || !normalizedVisitIds.length || !idempotencyKey) return {
+    createdCount: 0,
+    billedVisitCount: 0,
+    invoices: []
+  };
+
+  const response = await supabaseRpc('generate_billing_invoices', {
+    target_company_id: companyId,
+    target_visit_ids: normalizedVisitIds,
+    target_idempotency_key: idempotencyKey,
+    target_invoice_date: invoiceDate || new Date().toISOString().slice(0, 10),
+    target_due_date: dueDate || null
+  });
+
+  const result = requireRemoteResult(
+    response.configured && !response.error ? response.data : null,
+    response.error?.message || 'Production atomic billing RPC failed.'
+  );
+  const invoiceIds = Array.isArray(result?.invoice_ids) ? result.invoice_ids : [];
+  const invoices = requireRemoteResult(
+    await readSupabaseInvoices(companyId),
+    'Production invoice read failed after billing RPC.'
+  ) || [];
+  const createdInvoices = invoices.filter((invoice) => invoiceIds.includes(invoice.invoice_id));
+
+  writeLocalInvoices(invoices, {
+    ...metadata,
+    action: metadata.action || 'invoice:create-billing-rpc',
+    invoice_ids: invoiceIds,
+    idempotency_key: idempotencyKey
+  });
+
+  emit('invoices:changed', {
+    action: metadata.eventAction || metadata.action || 'create-billing-rpc',
+    invoice_ids: invoiceIds,
+    invoices: clone(createdInvoices),
+    idempotency_key: idempotencyKey,
+    metadata: clone(metadata)
+  });
+
+  return {
+    createdCount: Number(result?.created_count || createdInvoices.length),
+    billedVisitCount: Number(result?.billed_visit_count || normalizedVisitIds.length),
+    invoices: clone(createdInvoices),
+    invoiceIds,
+    idempotencyKey,
+    idempotentReplay: Boolean(result?.idempotent_replay)
+  };
+}
+
 export async function updateInvoicePaymentFields(invoiceId, patch = {}, metadata = {}) {
   const state = readState();
   const sourceInvoices = isProductionMode()
@@ -343,7 +420,7 @@ export async function updateInvoicePaymentFields(invoiceId, patch = {}, metadata
 
   if (!updatedInvoice) return null;
   const persistedInvoice = requireRemoteResult(
-    await writeSupabaseInvoice(updatedInvoice),
+    await writeSupabaseInvoiceRecord(updatedInvoice),
     'Production invoice update failed.'
   ) || updatedInvoice;
   const persistedInvoices = nextInvoices.map((invoice) => (

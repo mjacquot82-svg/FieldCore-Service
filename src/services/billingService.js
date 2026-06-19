@@ -1,8 +1,18 @@
 import { emit } from '../data/appEventBus.js';
+import { isProductionMode } from '../data/appMode.js';
 import { listCustomers } from '../data/repositories/customerRepository.js';
-import { createInvoices, listInvoices } from '../data/repositories/invoiceRepository.js';
+import {
+  createBillingInvoicesForVisits,
+  createInvoices,
+  listInvoices
+} from '../data/repositories/invoiceRepository.js';
 import { listProperties } from '../data/repositories/propertyRepository.js';
-import { listVisits, updateVisit } from '../data/repositories/visitRepository.js';
+import {
+  listVisits,
+  syncVisitsFromSupabase,
+  updateVisit
+} from '../data/repositories/visitRepository.js';
+import { resolveRepositoryCompanyId } from '../data/repositoryContext.js';
 import { readState } from '../data/storage/local-state-adapter.js';
 
 function addDays(date, days) {
@@ -19,8 +29,43 @@ function getPropertyMap(properties) {
   return Object.fromEntries((properties || []).map((property) => [property.property_id, property]));
 }
 
+function buildBillingIdempotencyKey(companyId, visitIds, metadata = {}) {
+  const normalizedVisitIds = [...new Set(visitIds || [])].filter(Boolean).sort();
+  return metadata.idempotencyKey || `billing:${companyId}:${normalizedVisitIds.join(',')}`;
+}
+
 export async function generateInvoicesForVisits(visitIds, metadata = {}) {
   const selectedVisitIds = new Set(visitIds);
+  if (isProductionMode()) {
+    const companyId = await resolveRepositoryCompanyId();
+    const normalizedVisitIds = [...selectedVisitIds].filter(Boolean).sort();
+    if (!companyId) throw new Error('Production billing requires a resolved company context.');
+    if (!normalizedVisitIds.length) return { createdCount: 0, billedVisitCount: 0, invoices: [] };
+    const idempotencyKey = buildBillingIdempotencyKey(companyId, normalizedVisitIds, metadata);
+    const summary = await createBillingInvoicesForVisits({
+      visitIds: normalizedVisitIds,
+      idempotencyKey,
+      invoiceDate: metadata.invoiceDate,
+      dueDate: metadata.dueDate
+    }, {
+      ...metadata,
+      action: metadata.action || 'billing:create-selected-invoices-rpc',
+      eventAction: metadata.eventAction || 'billing-create-selected-invoices-rpc'
+    });
+
+    await syncVisitsFromSupabase();
+
+    if (summary.createdCount || summary.billedVisitCount) {
+      emit('billing:invoices-generated', {
+        ...summary,
+        visit_ids: normalizedVisitIds,
+        metadata
+      });
+    }
+
+    return summary;
+  }
+
   const state = readState();
   const properties = listProperties();
   const customers = listCustomers();

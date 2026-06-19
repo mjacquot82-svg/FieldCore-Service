@@ -142,3 +142,10 @@ export async function supabaseDelete(table, params = {}) {
     }
   });
 }
+
+export async function supabaseRpc(functionName, body = {}) {
+  return supabaseRequest(`rpc/${functionName}`, {
+    method: 'POST',
+    body
+  });
+}
