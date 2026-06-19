@@ -139,6 +139,7 @@ async function completePilotVisit(page) {
 async function generatePilotInvoice(page) {
   await nav(page, 'Billing Queue');
   await expect(page.getByRole('heading', { name: 'Billing Queue', exact: true })).toBeVisible();
+  await expect(page.locator('section.ready-bill-queue[data-ready-bill-queue]')).toBeVisible();
   await expect(page.locator('.ready-bill-list')).toContainText('Pilot Customer LLC');
   await expect(page.locator('article.ready-bill-row').first()).toBeVisible();
   const pilotBillingRow = page.locator('article.ready-bill-row')
