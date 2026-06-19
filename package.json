@@ -1,6 +1,7 @@
 {
   "type": "module",
   "scripts": {
+    "build:netlify": "node scripts/generate-runtime-config.mjs",
     "test": "node tests/pilot-regression.test.mjs",
     "test:e2e": "playwright test"
   },
